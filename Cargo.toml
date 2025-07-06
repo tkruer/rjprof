@@ -1,0 +1,15 @@
+[package]
+name = "rjprof"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rjprof"
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21.1"
+libc = "0.2"
+
+[build-dependencies]
+bindgen = "0.69.4"
