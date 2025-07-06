@@ -282,6 +282,7 @@ dependencies = [
  "bindgen",
  "jni",
  "libc",
+ "once_cell",
 ]
 
 [[package]]
