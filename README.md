@@ -15,24 +15,28 @@ Hello from Java!
 Starting sleeping...
 
 === Top 20 slowest methods (avg ns) ===
-main([Ljava/lang/String;)V — calls=1 avg=10006132417ns total=10006132417ns
-sleep(J)V — calls=1 avg=10005724500ns total=10005724500ns
-sleepNanos(J)V — calls=1 avg=10005718416ns total=10005718416ns
-sleepNanos0(J)V — calls=1 avg=10005167625ns total=10005167625ns
-checkAndLoadMain(ZILjava/lang/String;)Ljava/lang/Class; — calls=1 avg=15080459ns total=15080459ns
-loadMainClass(ILjava/lang/String;)Ljava/lang/Class; — calls=1 avg=14532417ns total=14532417ns
-<init>(Ljava/lang/String;)V — calls=1 avg=6974167ns total=6974167ns
-<init>(Ljava/io/File;ZI)V — calls=1 avg=6954291ns total=6954291ns
-getMainClassFromJar(Ljava/util/jar/JarFile;)Ljava/lang/String; — calls=1 avg=4167500ns total=4167500ns
-<clinit>()V — calls=1 avg=4055042ns total=4055042ns
-<clinit>()V — calls=1 avg=4034875ns total=4034875ns
-<init>()V — calls=1 avg=3738958ns total=3738958ns
-<init>()V — calls=1 avg=3738208ns total=3738208ns
-<init>()V — calls=1 avg=3737416ns total=3737416ns
-newFileSystem(Ljava/lang/String;)Lsun/nio/fs/UnixFileSystem; — calls=1 avg=3732791ns total=3732791ns
-newFileSystem(Ljava/lang/String;)Lsun/nio/fs/MacOSXFileSystem; — calls=1 avg=3732000ns total=3732000ns
-<init>(Lsun/nio/fs/UnixFileSystemProvider;Ljava/lang/String;)V — calls=1 avg=3678958ns total=3678958ns
-<init>(Lsun/nio/fs/UnixFileSystemProvider;Ljava/lang/String;)V — calls=1 avg=3678042ns total=3678042ns
-<init>(Lsun/nio/fs/UnixFileSystemProvider;Ljava/lang/String;)V — calls=1 avg=3677250ns total=3677250ns
-<init>(Ljava/io/File;ZILjava/lang/Runtime$Version;)V — calls=2 avg=3622854ns total=7245708ns
+Method                                                               Calls       Avg(ns)     Total(ns)
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+main([Ljava/lang/String;)V                                               1 10005844125ns 10005844125ns
+sleep(J)V                                                                1 10005343500ns 10005343500ns
+sleepNanos(J)V                                                           1 10005332542ns 10005332542ns
+sleepNanos0(J)V                                                          1 10005135667ns 10005135667ns
+checkAndLoadMain(ZILjava/lang/String;)Ljava/lang/Class;                  1    14971333ns    14971333ns
+loadMainClass(ILjava/lang/String;)Ljava/lang/Class;                      1    14549250ns    14549250ns
+<init>(Ljava/lang/String;)V                                              1     6534542ns     6534542ns
+<init>(Ljava/io/File;ZI)V                                                1     6510667ns     6510667ns
+getMainClassFromJar(Ljava/util/jar/JarFile;)Ljava/lang/String;           1     4074500ns     4074500ns
+<clinit>()V                                                              1     3462417ns     3462417ns
+<clinit>()V                                                              1     3436292ns     3436292ns
+<init>(Ljava/io/File;ZILjava/lang/Runtime$Version;)V                     2     3431021ns     6862042ns
+<init>(Ljava/io/File;I)V                                                 2     3419604ns     6839208ns
+<init>(Ljava/io/File;ILjava/nio/charset/Charset;)V                       2     3418292ns     6836584ns
+<init>()V                                                                1     3331000ns     3331000ns
+<init>()V                                                                1     3330166ns     3330166ns
+<init>()V                                                                1     3329291ns     3329291ns
+newFileSystem(Ljava/lang/String;)Lsun/nio/fs/UnixFileSystem;             1     3323250ns     3323250ns
+newFileSystem(Ljava/lang/String;)Lsun/nio/fs/MacOSXFileSystem;           1     3322291ns     3322291ns
+forName(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;     1     3274833ns     3274833ns
 

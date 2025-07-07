@@ -6,6 +6,7 @@ edition = "2021"
 [lib]
 name = "rjprof"
 crate-type = ["cdylib"]
+rustflags = ["-A non_snake_case"]
 
 [dependencies]
 jni = "0.21.1"

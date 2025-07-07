@@ -7,7 +7,7 @@ fn main() {
     let java_home = env::var("JAVA_HOME").expect("Please set JAVA_HOME to your JDK installation");
 
     bindgen::Builder::default()
-        .header("wrapper.h")
+        .header("src/wrapper.h")
         // point to JNI & JVMTI headers
         .clang_arg(format!("-I{}/include", java_home))
         .clang_arg(format!("-I{}/include/darwin", java_home)) // macOS
@@ -19,6 +19,6 @@ fn main() {
         .allowlist_var("JNI_ERR")
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file(PathBuf::from("src/bindings.rs"))
+        .write_to_file(PathBuf::from("src/bindings/gen_bindings.rs"))
         .expect("Couldn't write bindings!");
 }

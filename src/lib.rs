@@ -1,4 +1,3 @@
-mod bindings;
 use bindings::*;
 use core::ffi::c_char;
 use std::os::raw::c_void;
@@ -15,7 +14,8 @@ thread_local! {
     static ENTRY_TIMES: RefCell<HashMap<jmethodID, u64>> = RefCell::new(HashMap::new());
 }
 
-/// Newtype wrapper for JVMTI method IDs, so we can safely share across threads. #[derive(Clone, Copy, Hash, Eq, PartialEq)]
+/// Newtype wrapper for JVMTI method IDs, so we can safely share across threads.
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
 struct MethodId(jmethodID);
 // SAFETY: jmethodID is a raw pointer; it is safe to send and share between threads.
 unsafe impl Send for MethodId {}
@@ -78,11 +78,14 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
         guard.iter().map(|(&m, st)| (m, *st)).collect()
     };
     stats.sort_by_key(|&(_, st)| std::cmp::Reverse(st.total_nanos / st.count));
-    println!(
-        "\n=== Top {} slowest methods (avg ns) ===",
-        std::cmp::min(stats.len(), 20)
-    );
-    for (MethodId(method), st) in stats.into_iter().take(20) {
+    let top_n = std::cmp::min(stats.len(), 20);
+    println!("\n=== Top {} slowest methods (avg ns) ===", top_n);
+    let mut rows = Vec::with_capacity(top_n);
+    let mut max_method_len = "Method".len();
+    let mut max_calls_len = "Calls".len();
+    let mut max_avg_len = "Avg(ns)".len();
+    let mut max_total_len = "Total(ns)".len();
+    for (MethodId(method), st) in stats.into_iter().take(top_n) {
         let (name, sig) = unsafe {
             let mut name_ptr: *mut c_char = std::ptr::null_mut();
             let mut sig_ptr: *mut c_char = std::ptr::null_mut();
@@ -102,13 +105,50 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
                 ("<unknown>".to_string(), String::new())
             }
         };
+        let method_str = format!("{}{}", name, sig);
+        let calls_str = format!("{}", st.count);
+        let avg_val = st.total_nanos / st.count;
+        let avg_str = format!("{}ns", avg_val);
+        let total_str = format!("{}ns", st.total_nanos);
+        max_method_len = max_method_len.max(method_str.len());
+        max_calls_len = max_calls_len.max(calls_str.len());
+        max_avg_len = max_avg_len.max(avg_str.len());
+        max_total_len = max_total_len.max(total_str.len());
+        rows.push((method_str, calls_str, avg_str, total_str));
+    }
+    println!(
+        "{:<method_width$} {:>calls_width$} {:>avg_width$} {:>total_width$}",
+        "Method",
+        "Calls",
+        "Avg(ns)",
+        "Total(ns)",
+        method_width = max_method_len,
+        calls_width = max_calls_len,
+        avg_width = max_avg_len,
+        total_width = max_total_len
+    );
+    println!(
+        "{:-<method_width$} {:-<calls_width$} {:-<avg_width$} {:-<total_width$}",
+        "",
+        "",
+        "",
+        "",
+        method_width = max_method_len,
+        calls_width = max_calls_len,
+        avg_width = max_avg_len,
+        total_width = max_total_len
+    );
+    for (m, c, a, t) in rows {
         println!(
-            "{}{} — calls={} avg={}ns total={}ns",
-            name,
-            sig,
-            st.count,
-            st.total_nanos / st.count,
-            st.total_nanos
+            "{:<method_width$} {:>calls_width$} {:>avg_width$} {:>total_width$}",
+            m,
+            c,
+            a,
+            t,
+            method_width = max_method_len,
+            calls_width = max_calls_len,
+            avg_width = max_avg_len,
+            total_width = max_total_len
         );
     }
 }
