@@ -607,6 +607,7 @@ name = "rjprof"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "clap",
  "inferno",
  "jni",
  "libc",

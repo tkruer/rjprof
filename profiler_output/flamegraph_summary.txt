@@ -1,0 +1,16 @@
+Flamegraph Summary
+==================
+Total samples: 13578
+Total time: 42.59s
+
+Top 10 methods by self-time:
+com.example.Main.main: 10.01s
+java.lang.Thread.sleep: 10.01s
+java.lang.Thread.sleepNanos: 10.01s
+java.lang.Thread.sleepNanos0: 10.01s
+java.util.jar.JarFile.<init>: 159.9ms
+sun.launcher.LauncherHelper.checkAndLoadMain: 140.9ms
+sun.launcher.LauncherHelper.loadMainClass: 136.5ms
+java.util.zip.ZipFile.<init>: 118.1ms
+jdk.internal.loader.NativeLibraries.loadLibrary: 88.2ms
+jdk.internal.loader.BuiltinClassLoader.loadClassOrNull: 64.5ms

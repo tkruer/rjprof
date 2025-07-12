@@ -1,3 +1,2 @@
 // src/cli/mod.rs
-
-pub mod cli;
+pub mod cli_tooling;
