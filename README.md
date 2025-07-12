@@ -14,4 +14,4 @@ cargo clean && RUSTFLAGS="-Awarnings" cargo build --release && RUSTFLAGS="-Awarn
 
 - It "works" for now. Obviously, it's pretty early.
 
-![image](https://github.com/tkruer/rjprof/blob/main/flamegraph.svg)
+![image](https://github.com/tkruer/rjprof/blob/main/examples/flamegraph.svg)
