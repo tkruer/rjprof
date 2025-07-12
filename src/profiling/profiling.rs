@@ -9,7 +9,6 @@ use std::ffi::CStr;
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
-use std::time::Duration;
 
 use crate::bindings::gen_bindings::*;
 

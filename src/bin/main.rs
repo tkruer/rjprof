@@ -5,7 +5,7 @@ use rjprof::cli::cli_tooling::{generate_flamegraph_svg, parse_config, run_profil
 fn main() {
     let matches = Command::new("rjprof")
         .version("1.0.0")
-        .author("Your Name <your.email@example.com>")
+        .author("Tyler Kruer tyler@tkruer.com>")
         .about("Rust-based Java profiler with flamegraph generation")
         .arg(
             Arg::new("jar")
