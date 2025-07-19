@@ -1,0 +1,15 @@
+[package]
+name = "rjprof-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Command-line interface for rjprof Java profiler"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tkruer/rjprof"
+
+[[bin]]
+name = "rjprof"
+path = "src/main.rs"
+
+[dependencies]
+librjprof = { path = "../librjprof" }
+clap = { workspace = true }

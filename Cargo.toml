@@ -1,23 +1,14 @@
-[package]
-name = "rjprof"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = [
+    "librjprof",
+    "rjprof-cli"
+]
 
-[lib]
-name = "rjprof"
-crate-type = ["rlib", "cdylib"]
-rustflags = ["-A non_snake_case"]
-
-[[bin]]
-name = "rjprof"
-path = "src/bin/main.rs"
-
-[dependencies]
+[workspace.dependencies]
 clap = { version = "4.0", features = ["derive"] }
 inferno = "0.12.3"
 jni = "0.21.1"
 libc = "0.2"
 once_cell = "1"
-
-[build-dependencies]
 bindgen = "0.69.4"

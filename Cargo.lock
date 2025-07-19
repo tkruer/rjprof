@@ -434,6 +434,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "librjprof"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "inferno",
+ "jni",
+ "libc",
+ "once_cell",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -603,15 +614,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "rjprof"
+name = "rjprof-cli"
 version = "0.1.0"
 dependencies = [
- "bindgen",
  "clap",
- "inferno",
- "jni",
- "libc",
- "once_cell",
+ "librjprof",
 ]
 
 [[package]]

@@ -1,0 +1,20 @@
+[package]
+name = "librjprof"
+version = "0.1.0"
+edition = "2021"
+description = "Java profiling library using JVMTI"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tkruer/rjprof"
+
+[lib]
+name = "rjprof"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+jni = { workspace = true }
+libc = { workspace = true }
+once_cell = { workspace = true }
+inferno = { workspace = true }
+
+[build-dependencies]
+bindgen = { workspace = true }
