@@ -1,2 +1,2 @@
-Main-Class: com.example.Main
-
+Manifest-Version: 1.0
+Main-Class: com.restapi.Main

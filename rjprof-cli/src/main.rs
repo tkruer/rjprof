@@ -1,11 +1,14 @@
-// src/main.rs
 use clap::{Arg, Command};
-use rjprof::cli::cli_tooling::{generate_flamegraph_svg, parse_config, run_profiler};
+use rjprof::{ProfilerConfig, SortOption, ExportFormat, ProfileMode, get_spring_excludes, configure_profiler};
+
+mod cli;
+
+use cli::cli_tooling::{parse_config, run_profiler, generate_flamegraph_svg};
 
 fn main() {
     let matches = Command::new("rjprof")
         .version("1.0.0")
-        .author("Tyler Kruer tyler@tkruer.com>")
+        .author("Tyler Kruer <tyler@tkruer.com>")
         .about("Rust-based Java profiler with flamegraph generation")
         .arg(
             Arg::new("jar")
@@ -170,6 +173,9 @@ fn main() {
         }
     };
 
+    // Configure the profiler library
+    configure_profiler(config.clone());
+
     if matches.get_flag("verbose") {
         println!("🔧 Configuration:");
         println!("  JAR file: {}", config.jar_file);
@@ -181,6 +187,7 @@ fn main() {
             "  Features: flamegraph={}, allocation={}, call-graph={}",
             config.flamegraph, config.allocation_tracking, config.call_graph
         );
+        println!("  Profile mode: {:?}", config.profile_mode);
     }
 
     if let Err(e) = run_profiler(&config, matches.get_flag("verbose")) {

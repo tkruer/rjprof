@@ -11,7 +11,7 @@ use std::io::Write;
 use std::sync::Mutex;
 
 use crate::bindings::gen_bindings::*;
-use crate::cli::cli_tooling::{ProfilerConfig, SortOption, ExportFormat, ProfileMode};
+use crate::{ProfilerConfig, SortOption, ExportFormat, ProfileMode};
 
 thread_local! {
     static ENTRY_TIMES: RefCell<HashMap<jmethodID, u64>> = RefCell::new(HashMap::new());

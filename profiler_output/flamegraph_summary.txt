@@ -1,16 +1,16 @@
 Flamegraph Summary
 ==================
-Total samples: 13578
-Total time: 42.59s
+Total samples: 2387358
+Total time: 23.94s
 
 Top 10 methods by self-time:
-com.example.Main.main: 10.01s
-java.lang.Thread.sleep: 10.01s
-java.lang.Thread.sleepNanos: 10.01s
-java.lang.Thread.sleepNanos0: 10.01s
-java.util.jar.JarFile.<init>: 159.9ms
-sun.launcher.LauncherHelper.checkAndLoadMain: 140.9ms
-sun.launcher.LauncherHelper.loadMainClass: 136.5ms
-java.util.zip.ZipFile.<init>: 118.1ms
-jdk.internal.loader.NativeLibraries.loadLibrary: 88.2ms
-jdk.internal.loader.BuiltinClassLoader.loadClassOrNull: 64.5ms
+org.antlr.v4.runtime.atn.ATNConfigSet$ConfigEqualityComparator.hashCode: 3.02s
+org.antlr.v4.runtime.atn.PredictionContext.calculateHashCode: 2.91s
+org.antlr.v4.runtime.misc.MurmurHash.update: 2.79s
+org.antlr.v4.runtime.misc.Array2DHashSet.getOrAdd: 2.23s
+org.antlr.v4.runtime.misc.Array2DHashSet.getBucket: 1.98s
+org.antlr.v4.runtime.atn.SemanticContext$Predicate.hashCode: 1.97s
+org.antlr.v4.runtime.misc.Array2DHashSet.getOrAddImpl: 1.76s
+org.antlr.v4.runtime.atn.ATNConfig.hashCode: 1.44s
+org.antlr.v4.runtime.atn.SingletonPredictionContext.equals: 838.9ms
+org.antlr.v4.runtime.atn.PredictionMode$AltAndContextConfigEqualityComparator.hashCode: 638.6ms
