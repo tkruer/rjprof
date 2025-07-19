@@ -90,6 +90,76 @@ fn main() {
                 .help("Verbose output")
                 .action(clap::ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("sort")
+                .long("sort")
+                .value_name("FIELD")
+                .help("Sort results by field: total, self, calls, name, percentage")
+                .default_value("self"),
+        )
+        .arg(
+            Arg::new("min-total")
+                .long("min-total")
+                .value_name("TIME")
+                .help("Hide methods with total time below threshold (e.g., 1ms, 100us)"),
+        )
+        .arg(
+            Arg::new("min-percentage")
+                .long("min-pct")
+                .value_name("PERCENT")
+                .help("Hide methods below percentage of total time (e.g., 0.1)"),
+        )
+        .arg(
+            Arg::new("no-color")
+                .long("no-color")
+                .help("Disable colorized output")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("raw-times")
+                .long("raw-times")
+                .help("Show raw nanosecond times instead of human-readable")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("export")
+                .long("export")
+                .value_name("FORMAT")
+                .help("Export results to file: json, csv"),
+        )
+        .arg(
+            Arg::new("exclude")
+                .long("exclude")
+                .value_name("PATTERNS")
+                .help("Exclude packages/classes (e.g., java.*,spring.*)")
+                .action(clap::ArgAction::Append),
+        )
+        .arg(
+            Arg::new("include")
+                .long("include")
+                .value_name("PATTERNS")
+                .help("Include only these packages/classes (e.g., com.myapp.*)")
+                .action(clap::ArgAction::Append),
+        )
+        .arg(
+            Arg::new("min-self-time")
+                .long("min-self-time")
+                .value_name("TIME")
+                .help("Hide methods with self-time below threshold (e.g., 100us)"),
+        )
+        .arg(
+            Arg::new("mode")
+                .long("mode")
+                .value_name("MODE")
+                .help("Profile mode: all, user, hotspots, allocation")
+                .default_value("user"),
+        )
+        .arg(
+            Arg::new("spring")
+                .long("spring")
+                .help("Enable Spring-optimized filtering (excludes common Spring noise)")
+                .action(clap::ArgAction::SetTrue),
+        )
         .get_matches();
 
     let config = match parse_config(&matches) {

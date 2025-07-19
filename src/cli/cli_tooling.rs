@@ -1,11 +1,10 @@
-use clap::{Arg, ArgMatches, Command};
+use clap::ArgMatches;
 use std::env;
 use std::fs;
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command as ProcessCommand, Stdio};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProfilerConfig {
     pub jar_file: String,
     pub java_opts: Vec<String>,
@@ -17,6 +16,39 @@ pub struct ProfilerConfig {
     pub call_graph: bool,
     pub sampling_interval: Option<u64>,
     pub java_executable: String,
+    pub sort_by: SortOption,
+    pub min_total_ns: Option<u64>,
+    pub min_percentage: Option<f64>,
+    pub colorized: bool,
+    pub export_format: Option<ExportFormat>,
+    pub human_readable: bool,
+    pub exclude_packages: Vec<String>,
+    pub include_packages: Vec<String>,
+    pub min_self_time_ns: Option<u64>,
+    pub profile_mode: ProfileMode,
+}
+
+#[derive(Debug, Clone)]
+pub enum SortOption {
+    TotalTime,
+    SelfTime,
+    Calls,
+    Name,
+    Percentage,
+}
+
+#[derive(Debug, Clone)]
+pub enum ExportFormat {
+    Json,
+    Csv,
+}
+
+#[derive(Debug, Clone)]
+pub enum ProfileMode {
+    All,           // Profile everything
+    UserCode,      // Only user code (exclude JDK/framework)
+    Hotspots,      // Focus on methods above threshold
+    Allocation,    // Focus on allocation-heavy methods
 }
 
 impl Default for ProfilerConfig {
@@ -32,6 +64,16 @@ impl Default for ProfilerConfig {
             call_graph: true,
             sampling_interval: None,
             java_executable: "java".to_string(),
+            sort_by: SortOption::SelfTime,
+            min_total_ns: None,
+            min_percentage: None,
+            colorized: true,
+            export_format: None,
+            human_readable: true,
+            exclude_packages: get_default_excludes(),
+            include_packages: vec![],
+            min_self_time_ns: None,
+            profile_mode: ProfileMode::UserCode,
         }
     }
 }
@@ -89,7 +131,90 @@ pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
         config.sampling_interval = Some(interval.parse().map_err(|_| "Invalid sampling interval")?);
     }
 
+    // Sort option
+    if let Some(sort) = matches.get_one::<String>("sort") {
+        config.sort_by = match sort.as_str() {
+            "total" => SortOption::TotalTime,
+            "self" => SortOption::SelfTime,
+            "calls" => SortOption::Calls,
+            "name" => SortOption::Name,
+            "percentage" | "pct" => SortOption::Percentage,
+            _ => return Err(format!("Invalid sort option: {}. Use: total, self, calls, name, percentage", sort)),
+        };
+    }
+
+    // Threshold filtering
+    if let Some(min_total) = matches.get_one::<String>("min-total") {
+        config.min_total_ns = Some(parse_time_to_nanos(min_total)?);
+    }
+
+    if let Some(min_pct) = matches.get_one::<String>("min-percentage") {
+        config.min_percentage = Some(min_pct.parse().map_err(|_| "Invalid percentage value")?);
+    }
+
+    // Output options
+    config.colorized = !matches.get_flag("no-color");
+    config.human_readable = !matches.get_flag("raw-times");
+
+    // Export format
+    if let Some(format) = matches.get_one::<String>("export") {
+        config.export_format = Some(match format.as_str() {
+            "json" => ExportFormat::Json,
+            "csv" => ExportFormat::Csv,
+            _ => return Err(format!("Invalid export format: {}. Use: json, csv", format)),
+        });
+    }
+
+    // Package filtering
+    if matches.get_flag("spring") {
+        config.exclude_packages = get_spring_excludes();
+    } else if let Some(excludes) = matches.get_many::<String>("exclude") {
+        config.exclude_packages = excludes.cloned().collect();
+    }
+    
+    if let Some(includes) = matches.get_many::<String>("include") {
+        config.include_packages = includes.cloned().collect();
+    }
+
+    // Min self time threshold
+    if let Some(min_self) = matches.get_one::<String>("min-self-time") {
+        config.min_self_time_ns = Some(parse_time_to_nanos(min_self)?);
+    }
+
+    // Profile mode
+    if let Some(mode) = matches.get_one::<String>("mode") {
+        config.profile_mode = match mode.as_str() {
+            "all" => ProfileMode::All,
+            "user" | "usercode" => ProfileMode::UserCode,
+            "hotspots" => ProfileMode::Hotspots,
+            "allocation" | "alloc" => ProfileMode::Allocation,
+            _ => return Err(format!("Invalid profile mode: {}. Use: all, user, hotspots, allocation", mode)),
+        };
+    }
+
     Ok(config)
+}
+
+fn parse_time_to_nanos(time_str: &str) -> Result<u64, String> {
+    let time_str = time_str.trim().to_lowercase();
+    
+    if let Some(pos) = time_str.find(|c: char| c.is_alphabetic()) {
+        let (number_part, unit_part) = time_str.split_at(pos);
+        let number: f64 = number_part.parse().map_err(|_| "Invalid time number")?;
+        
+        let multiplier = match unit_part {
+            "ns" => 1,
+            "us" | "μs" => 1_000,
+            "ms" => 1_000_000,
+            "s" => 1_000_000_000,
+            _ => return Err(format!("Invalid time unit: {}. Use: ns, us, ms, s", unit_part)),
+        };
+        
+        Ok((number * multiplier as f64) as u64)
+    } else {
+        // Assume nanoseconds if no unit specified
+        time_str.parse().map_err(|_| "Invalid time value".to_string())
+    }
 }
 
 pub fn detect_agent_path() -> Result<String, String> {
@@ -111,6 +236,8 @@ pub fn detect_agent_path() -> Result<String, String> {
 }
 
 pub fn run_profiler(config: &ProfilerConfig, verbose: bool) -> Result<(), String> {
+    // Set the global configuration for the profiling module
+    crate::profiling::profiling::set_profiler_config(config.clone());
     // Create output directory
     if let Err(e) = fs::create_dir_all(&config.output_dir) {
         return Err(format!("Failed to create output directory: {}", e));
@@ -217,6 +344,55 @@ pub fn generate_flamegraph_svg(config: &ProfilerConfig) -> Result<(), String> {
     }
 
     Err("No flamegraph generator found. Install flamegraph.pl or inferno-flamegraph".to_string())
+}
+
+fn get_default_excludes() -> Vec<String> {
+    vec![
+        // JDK internals
+        "java.*".to_string(),
+        "javax.*".to_string(),
+        "sun.*".to_string(),
+        "com.sun.*".to_string(),
+        "jdk.*".to_string(),
+        
+        // Spring Framework (common noise)
+        "org.springframework.*".to_string(),
+        "org.apache.catalina.*".to_string(),
+        "org.apache.tomcat.*".to_string(),
+        "org.eclipse.jetty.*".to_string(),
+        
+        // Common libraries that create noise
+        "org.apache.logging.*".to_string(),
+        "ch.qos.logback.*".to_string(),
+        "org.slf4j.*".to_string(),
+        "net.sf.cglib.*".to_string(),
+        "org.apache.commons.*".to_string(),
+        
+        // Reflection/Proxying
+        "$$EnhancerBySpringCGLIB*".to_string(),
+        "$$FastClassBySpringCGLIB*".to_string(),
+        "com.sun.proxy.*".to_string(),
+        
+        // Build tools
+        "org.gradle.*".to_string(),
+        "org.apache.maven.*".to_string(),
+    ]
+}
+
+pub fn get_spring_excludes() -> Vec<String> {
+    let mut excludes = get_default_excludes();
+    excludes.extend(vec![
+        "org.springframework.*".to_string(),
+        "org.apache.catalina.*".to_string(),
+        "org.apache.tomcat.*".to_string(),
+        "org.hibernate.*".to_string(),
+        "org.apache.coyote.*".to_string(),
+        "org.eclipse.jetty.*".to_string(),
+        "io.undertow.*".to_string(),
+        "reactor.*".to_string(),
+        "io.netty.*".to_string(),
+    ]);
+    excludes
 }
 
 #[cfg(test)]
