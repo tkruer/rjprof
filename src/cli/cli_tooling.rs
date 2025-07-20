@@ -49,6 +49,10 @@ pub enum ProfileMode {
     UserCode,      // Only user code (exclude JDK/framework)
     Hotspots,      // Focus on methods above threshold
     Allocation,    // Focus on allocation-heavy methods
+    pub profile_mode: String,
+    pub gc_events: bool,
+    pub thread_events: bool,
+    pub lock_contention: bool,
 }
 
 impl Default for ProfilerConfig {
@@ -62,7 +66,7 @@ impl Default for ProfilerConfig {
             flamegraph: true,
             allocation_tracking: true,
             call_graph: true,
-            sampling_interval: None,
+            sampling_interval: Some(10),
             java_executable: "java".to_string(),
             sort_by: SortOption::SelfTime,
             min_total_ns: None,
@@ -74,6 +78,10 @@ impl Default for ProfilerConfig {
             include_packages: vec![],
             min_self_time_ns: None,
             profile_mode: ProfileMode::UserCode,
+            profile_mode: "all".to_string(),
+            gc_events: true,
+            thread_events: true,
+            lock_contention: true,
         }
     }
 }
@@ -190,6 +198,33 @@ pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
             "allocation" | "alloc" => ProfileMode::Allocation,
             _ => return Err(format!("Invalid profile mode: {}. Use: all, user, hotspots, allocation", mode)),
         };
+    // Profile mode
+    config.profile_mode = matches.get_one::<String>("profile-mode").unwrap().clone();
+
+    // Event tracking flags
+    config.gc_events = !matches.get_flag("no-gc-events");
+    config.thread_events = !matches.get_flag("no-thread-events");
+    config.lock_contention = !matches.get_flag("no-lock-contention");
+
+    // Adjust feature flags based on profile mode
+    match config.profile_mode.as_str() {
+        "cpu" => {
+            config.allocation_tracking = false;
+            config.gc_events = false;
+        }
+        "memory" => {
+            config.flamegraph = false;
+            config.call_graph = false;
+        }
+        "allocation" => {
+            config.call_graph = false;
+            config.gc_events = false;
+            config.thread_events = false;
+        }
+        "all" => {
+            // Keep all defaults
+        }
+        _ => return Err("Invalid profile mode".to_string()),
     }
 
     Ok(config)

@@ -1,0 +1,492 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg version="1.1" width="1200" height="566" onload="init(evt)" viewBox="0 0 1200 566" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:fg="http://github.com/jonhoo/inferno"><!--Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples.--><!--NOTES: --><defs><linearGradient id="background" y1="0" y2="1" x1="0" x2="0"><stop stop-color="#eeeeee" offset="5%"/><stop stop-color="#eeeeb0" offset="95%"/></linearGradient></defs><style type="text/css">
+text { font-family:monospace; font-size:12px }
+#title { text-anchor:middle; font-size:17px; }
+#matched { text-anchor:end; }
+#search { text-anchor:end; opacity:0.1; cursor:pointer; }
+#search:hover, #search.show { opacity:1; }
+#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+#unzoom { cursor:pointer; }
+#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+.hide { display:none; }
+.parent { opacity:0.5; }
+</style><script type="text/ecmascript"><![CDATA[
+        var nametype = 'Function:';
+        var fontsize = 12;
+        var fontwidth = 0.59;
+        var xpad = 10;
+        var inverted = false;
+        var searchcolor = 'rgb(230,0,230)';
+        var fluiddrawing = true;
+        var truncate_text_right = false;
+    ]]><![CDATA["use strict";
+var details, searchbtn, unzoombtn, matchedtxt, svg, searching, frames, known_font_width;
+function init(evt) {
+    details = document.getElementById("details").firstChild;
+    searchbtn = document.getElementById("search");
+    unzoombtn = document.getElementById("unzoom");
+    matchedtxt = document.getElementById("matched");
+    svg = document.getElementsByTagName("svg")[0];
+    frames = document.getElementById("frames");
+    known_font_width = get_monospace_width(frames);
+    total_samples = parseInt(frames.attributes.total_samples.value);
+    searching = 0;
+
+    // Use GET parameters to restore a flamegraph's state.
+    var restore_state = function() {
+        var params = get_params();
+        if (params.x && params.y)
+            zoom(find_group(document.querySelector('[*|x="' + params.x + '"][y="' + params.y + '"]')));
+        if (params.s)
+            search(params.s);
+    };
+
+    if (fluiddrawing) {
+        // Make width dynamic so the SVG fits its parent's width.
+        svg.removeAttribute("width");
+        // Edge requires us to have a viewBox that gets updated with size changes.
+        var isEdge = /Edge\/\d./i.test(navigator.userAgent);
+        if (!isEdge) {
+            svg.removeAttribute("viewBox");
+        }
+        var update_for_width_change = function() {
+            if (isEdge) {
+                svg.attributes.viewBox.value = "0 0 " + svg.width.baseVal.value + " " + svg.height.baseVal.value;
+            }
+
+            // Keep consistent padding on left and right of frames container.
+            frames.attributes.width.value = svg.width.baseVal.value - xpad * 2;
+
+            // Text truncation needs to be adjusted for the current width.
+            update_text_for_elements(frames.children);
+
+            // Keep search elements at a fixed distance from right edge.
+            var svgWidth = svg.width.baseVal.value;
+            searchbtn.attributes.x.value = svgWidth - xpad;
+            matchedtxt.attributes.x.value = svgWidth - xpad;
+        };
+        window.addEventListener('resize', function() {
+            update_for_width_change();
+        });
+        // This needs to be done asynchronously for Safari to work.
+        setTimeout(function() {
+            unzoom();
+            update_for_width_change();
+            restore_state();
+        }, 0);
+    } else {
+        restore_state();
+    }
+}
+// event listeners
+window.addEventListener("click", function(e) {
+    var target = find_group(e.target);
+    if (target) {
+        if (target.nodeName == "a") {
+            if (e.ctrlKey === false) return;
+            e.preventDefault();
+        }
+        if (target.classList.contains("parent")) unzoom();
+        zoom(target);
+
+        // set parameters for zoom state
+        var el = target.querySelector("rect");
+        if (el && el.attributes && el.attributes.y && el.attributes["fg:x"]) {
+            var params = get_params()
+            params.x = el.attributes["fg:x"].value;
+            params.y = el.attributes.y.value;
+            history.replaceState(null, null, parse_params(params));
+        }
+    }
+    else if (e.target.id == "unzoom") {
+        unzoom();
+
+        // remove zoom state
+        var params = get_params();
+        if (params.x) delete params.x;
+        if (params.y) delete params.y;
+        history.replaceState(null, null, parse_params(params));
+    }
+    else if (e.target.id == "search") search_prompt();
+}, false)
+// mouse-over for info
+// show
+window.addEventListener("mouseover", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = nametype + " " + g_to_text(target);
+}, false)
+// clear
+window.addEventListener("mouseout", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = ' ';
+}, false)
+// ctrl-F for search
+window.addEventListener("keydown",function (e) {
+    if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+        e.preventDefault();
+        search_prompt();
+    }
+}, false)
+// functions
+function get_params() {
+    var params = {};
+    var paramsarr = window.location.search.substr(1).split('&');
+    for (var i = 0; i < paramsarr.length; ++i) {
+        var tmp = paramsarr[i].split("=");
+        if (!tmp[0] || !tmp[1]) continue;
+        params[tmp[0]]  = decodeURIComponent(tmp[1]);
+    }
+    return params;
+}
+function parse_params(params) {
+    var uri = "?";
+    for (var key in params) {
+        uri += key + '=' + encodeURIComponent(params[key]) + '&';
+    }
+    if (uri.slice(-1) == "&")
+        uri = uri.substring(0, uri.length - 1);
+    if (uri == '?')
+        uri = window.location.href.split('?')[0];
+    return uri;
+}
+function find_child(node, selector) {
+    var children = node.querySelectorAll(selector);
+    if (children.length) return children[0];
+    return;
+}
+function find_group(node) {
+    var parent = node.parentElement;
+    if (!parent) return;
+    if (parent.id == "frames") return node;
+    return find_group(parent);
+}
+function orig_save(e, attr, val) {
+    if (e.attributes["fg:orig_" + attr] != undefined) return;
+    if (e.attributes[attr] == undefined) return;
+    if (val == undefined) val = e.attributes[attr].value;
+    e.setAttribute("fg:orig_" + attr, val);
+}
+function orig_load(e, attr) {
+    if (e.attributes["fg:orig_"+attr] == undefined) return;
+    e.attributes[attr].value = e.attributes["fg:orig_" + attr].value;
+    e.removeAttribute("fg:orig_" + attr);
+}
+function g_to_text(e) {
+    var text = find_child(e, "title").firstChild.nodeValue;
+    return (text)
+}
+function g_to_func(e) {
+    var func = g_to_text(e);
+    // if there's any manipulation we want to do to the function
+    // name before it's searched, do it here before returning.
+    return (func);
+}
+function get_monospace_width(frames) {
+    // Given the id="frames" element, return the width of text characters if
+    // this is a monospace font, otherwise return 0.
+    text = find_child(frames.children[0], "text");
+    originalContent = text.textContent;
+    text.textContent = "!";
+    bangWidth = text.getComputedTextLength();
+    text.textContent = "W";
+    wWidth = text.getComputedTextLength();
+    text.textContent = originalContent;
+    if (bangWidth === wWidth) {
+        return bangWidth;
+    } else {
+        return 0;
+    }
+}
+function update_text_for_elements(elements) {
+    // In order to render quickly in the browser, you want to do one pass of
+    // reading attributes, and one pass of mutating attributes. See
+    // https://web.dev/avoid-large-complex-layouts-and-layout-thrashing/ for details.
+
+    // Fall back to inefficient calculation, if we're variable-width font.
+    // TODO This should be optimized somehow too.
+    if (known_font_width === 0) {
+        for (var i = 0; i < elements.length; i++) {
+            update_text(elements[i]);
+        }
+        return;
+    }
+
+    var textElemNewAttributes = [];
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var r = find_child(e, "rect");
+        var t = find_child(e, "text");
+        var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+        var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+        var newX = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+        // Smaller than this size won't fit anything
+        if (w < 2 * known_font_width) {
+            textElemNewAttributes.push([newX, ""]);
+            continue;
+        }
+
+        // Fit in full text width
+        if (txt.length * known_font_width < w) {
+            textElemNewAttributes.push([newX, txt]);
+            continue;
+        }
+
+        var substringLength = Math.floor(w / known_font_width) - 2;
+        if (truncate_text_right) {
+            // Truncate the right side of the text.
+            textElemNewAttributes.push([newX, txt.substring(0, substringLength) + ".."]);
+            continue;
+        } else {
+            // Truncate the left side of the text.
+            textElemNewAttributes.push([newX, ".." + txt.substring(txt.length - substringLength, txt.length)]);
+            continue;
+        }
+    }
+
+    console.assert(textElemNewAttributes.length === elements.length, "Resize failed, please file a bug at https://github.com/jonhoo/inferno/");
+
+    // Now that we know new textContent, set it all in one go so we don't refresh a bazillion times.
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var values = textElemNewAttributes[i];
+        var t = find_child(e, "text");
+        t.attributes.x.value = values[0];
+        t.textContent = values[1];
+    }
+}
+
+function update_text(e) {
+    var r = find_child(e, "rect");
+    var t = find_child(e, "text");
+    var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+    var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+    t.attributes.x.value = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+    // Smaller than this size won't fit anything
+    if (w < 2 * fontsize * fontwidth) {
+        t.textContent = "";
+        return;
+    }
+    t.textContent = txt;
+    // Fit in full text width
+    if (t.getComputedTextLength() < w)
+        return;
+    if (truncate_text_right) {
+        // Truncate the right side of the text.
+        for (var x = txt.length - 2; x > 0; x--) {
+            if (t.getSubStringLength(0, x + 2) <= w) {
+                t.textContent = txt.substring(0, x) + "..";
+                return;
+            }
+        }
+    } else {
+        // Truncate the left side of the text.
+        for (var x = 2; x < txt.length; x++) {
+            if (t.getSubStringLength(x - 2, txt.length) <= w) {
+                t.textContent = ".." + txt.substring(x, txt.length);
+                return;
+            }
+        }
+    }
+    t.textContent = "";
+}
+// zoom
+function zoom_reset(e) {
+    if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * parseInt(e.attributes["fg:x"].value) / total_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / total_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_reset(c[i]);
+    }
+}
+function zoom_child(e, x, zoomed_width_samples) {
+    if (e.tagName == "text") {
+        var parent_x = parseFloat(find_child(e.parentNode, "rect[x]").attributes.x.value);
+        e.attributes.x.value = format_percent(parent_x + (100 * 3 / frames.attributes.width.value));
+    } else if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * (parseInt(e.attributes["fg:x"].value) - x) / zoomed_width_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / zoomed_width_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_child(c[i], x, zoomed_width_samples);
+    }
+}
+function zoom_parent(e) {
+    if (e.attributes) {
+        if (e.attributes.x != undefined) {
+            e.attributes.x.value = "0.0%";
+        }
+        if (e.attributes.width != undefined) {
+            e.attributes.width.value = "100.0%";
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_parent(c[i]);
+    }
+}
+function zoom(node) {
+    var attr = find_child(node, "rect").attributes;
+    var width = parseInt(attr["fg:w"].value);
+    var xmin = parseInt(attr["fg:x"].value);
+    var xmax = xmin + width;
+    var ymin = parseFloat(attr.y.value);
+    unzoombtn.classList.remove("hide");
+    var el = frames.children;
+    var to_update_text = [];
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var a = find_child(e, "rect").attributes;
+        var ex = parseInt(a["fg:x"].value);
+        var ew = parseInt(a["fg:w"].value);
+        // Is it an ancestor
+        if (!inverted) {
+            var upstack = parseFloat(a.y.value) > ymin;
+        } else {
+            var upstack = parseFloat(a.y.value) < ymin;
+        }
+        if (upstack) {
+            // Direct ancestor
+            if (ex <= xmin && (ex+ew) >= xmax) {
+                e.classList.add("parent");
+                zoom_parent(e);
+                to_update_text.push(e);
+            }
+            // not in current path
+            else
+                e.classList.add("hide");
+        }
+        // Children maybe
+        else {
+            // no common path
+            if (ex < xmin || ex >= xmax) {
+                e.classList.add("hide");
+            }
+            else {
+                zoom_child(e, xmin, width);
+                to_update_text.push(e);
+            }
+        }
+    }
+    update_text_for_elements(to_update_text);
+}
+function unzoom() {
+    unzoombtn.classList.add("hide");
+    var el = frames.children;
+    for(var i = 0; i < el.length; i++) {
+        el[i].classList.remove("parent");
+        el[i].classList.remove("hide");
+        zoom_reset(el[i]);
+    }
+    update_text_for_elements(el);
+}
+// search
+function reset_search() {
+    var el = document.querySelectorAll("#frames rect");
+    for (var i = 0; i < el.length; i++) {
+        orig_load(el[i], "fill")
+    }
+    var params = get_params();
+    delete params.s;
+    history.replaceState(null, null, parse_params(params));
+}
+function search_prompt() {
+    if (!searching) {
+        var term = prompt("Enter a search term (regexp " +
+            "allowed, eg: ^ext4_)", "");
+        if (term != null) {
+            search(term)
+        }
+    } else {
+        reset_search();
+        searching = 0;
+        searchbtn.classList.remove("show");
+        searchbtn.firstChild.nodeValue = "Search"
+        matchedtxt.classList.add("hide");
+        matchedtxt.firstChild.nodeValue = ""
+    }
+}
+function search(term) {
+    var re = new RegExp(term);
+    var el = frames.children;
+    var matches = new Object();
+    var maxwidth = 0;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        // Skip over frames which are either not visible, or below the zoomed-to frame
+        if (e.classList.contains("hide") || e.classList.contains("parent")) {
+            continue;
+        }
+        var func = g_to_func(e);
+        var rect = find_child(e, "rect");
+        if (func == null || rect == null)
+            continue;
+        // Save max width. Only works as we have a root frame
+        var w = parseInt(rect.attributes["fg:w"].value);
+        if (w > maxwidth)
+            maxwidth = w;
+        if (func.match(re)) {
+            // highlight
+            var x = parseInt(rect.attributes["fg:x"].value);
+            orig_save(rect, "fill");
+            rect.attributes.fill.value = searchcolor;
+            // remember matches
+            if (matches[x] == undefined) {
+                matches[x] = w;
+            } else {
+                if (w > matches[x]) {
+                    // overwrite with parent
+                    matches[x] = w;
+                }
+            }
+            searching = 1;
+        }
+    }
+    if (!searching)
+        return;
+    var params = get_params();
+    params.s = term;
+    history.replaceState(null, null, parse_params(params));
+
+    searchbtn.classList.add("show");
+    searchbtn.firstChild.nodeValue = "Reset Search";
+    // calculate percent matched, excluding vertical overlap
+    var count = 0;
+    var lastx = -1;
+    var lastw = 0;
+    var keys = Array();
+    for (k in matches) {
+        if (matches.hasOwnProperty(k))
+            keys.push(k);
+    }
+    // sort the matched frames by their x location
+    // ascending, then width descending
+    keys.sort(function(a, b){
+        return a - b;
+    });
+    // Step through frames saving only the biggest bottom-up frames
+    // thanks to the sort order. This relies on the tree property
+    // where children are always smaller than their parents.
+    for (var k in keys) {
+        var x = parseInt(keys[k]);
+        var w = matches[keys[k]];
+        if (x >= lastx + lastw) {
+            count += w;
+            lastx = x;
+            lastw = w;
+        }
+    }
+    // display matched percent
+    matchedtxt.classList.remove("hide");
+    var pct = 100 * count / maxwidth;
+    if (pct != 100) pct = pct.toFixed(1);
+    matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+}
+function format_percent(n) {
+    return n.toFixed(4) + "%";
+}
+]]></script><rect x="0" y="0" width="100%" height="566" fill="url(#background)"/><text id="title" fill="rgb(0,0,0)" x="50.0000%" y="24.00">Flame Graph</text><text id="details" fill="rgb(0,0,0)" x="10" y="549.00"> </text><text id="unzoom" class="hide" fill="rgb(0,0,0)" x="10" y="24.00">Reset Zoom</text><text id="search" fill="rgb(0,0,0)" x="1190" y="24.00">Search</text><text id="matched" fill="rgb(0,0,0)" x="1190" y="549.00"> </text><svg id="frames" x="10" width="1180" total_samples="42521739952"><g><title>java.io.BufferedWriter.flushBuffer (7,960,254 samples, 0.02%)</title><rect x="23.5458%" y="453" width="0.0187%" height="15" fill="rgb(227,0,7)" fg:x="10012075833" fg:w="7960254"/><text x="23.7958%" y="463.50"></text></g><g><title>java.io.OutputStreamWriter.write (6,914,879 samples, 0.02%)</title><rect x="23.5482%" y="437" width="0.0163%" height="15" fill="rgb(217,0,24)" fg:x="10013121208" fg:w="6914879"/><text x="23.7982%" y="447.50"></text></g><g><title>sun.nio.cs.StreamEncoder.write (5,883,754 samples, 0.01%)</title><rect x="23.5507%" y="421" width="0.0138%" height="15" fill="rgb(221,193,54)" fg:x="10014152333" fg:w="5883754"/><text x="23.8007%" y="431.50"></text></g><g><title>sun.nio.cs.StreamEncoder.implWrite (4,860,546 samples, 0.01%)</title><rect x="23.5531%" y="405" width="0.0114%" height="15" fill="rgb(248,212,6)" fg:x="10015175541" fg:w="4860546"/><text x="23.8031%" y="415.50"></text></g><g><title>java.io.PrintStream.writeln (13,008,500 samples, 0.03%)</title><rect x="23.5416%" y="469" width="0.0306%" height="15" fill="rgb(208,68,35)" fg:x="10010300875" fg:w="13008500"/><text x="23.7916%" y="479.50"></text></g><g><title>java.io.PrintStream.println (14,799,208 samples, 0.03%)</title><rect x="23.5374%" y="485" width="0.0348%" height="15" fill="rgb(232,128,0)" fg:x="10008517625" fg:w="14799208"/><text x="23.7874%" y="495.50"></text></g><g><title>java.lang.ClassLoader.loadClass (10,057,330 samples, 0.02%)</title><rect x="23.5722%" y="485" width="0.0237%" height="15" fill="rgb(207,160,47)" fg:x="10023316833" fg:w="10057330"/><text x="23.8222%" y="495.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.loadClass (8,770,413 samples, 0.02%)</title><rect x="23.5752%" y="469" width="0.0206%" height="15" fill="rgb(228,23,34)" fg:x="10024603750" fg:w="8770413"/><text x="23.8252%" y="479.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.loadClassOrNull (7,487,788 samples, 0.02%)</title><rect x="23.5783%" y="453" width="0.0176%" height="15" fill="rgb(218,30,26)" fg:x="10025886375" fg:w="7487788"/><text x="23.8283%" y="463.50"></text></g><g><title>java.lang.Thread.sleepNanos (20,010,636,085 samples, 47.06%)</title><rect x="47.1260%" y="469" width="47.0598%" height="15" fill="rgb(220,122,19)" fg:x="20038797913" fg:w="20010636085"/><text x="47.3760%" y="479.50">java.lang.Thread.sleepNanos</text></g><g><title>java.lang.Thread.sleepNanos0 (10,005,130,084 samples, 23.53%)</title><rect x="70.6563%" y="453" width="23.5294%" height="15" fill="rgb(250,228,42)" fg:x="30044303914" fg:w="10005130084"/><text x="70.9063%" y="463.50">java.lang.Thread.sleepNanos0</text></g><g><title>com.example.Main.main (40,049,434,706 samples, 94.19%)</title><rect x="0.0000%" y="501" width="94.1858%" height="15" fill="rgb(240,193,28)" fg:x="0" fg:w="40049434706"/><text x="0.2500%" y="511.50">com.example.Main.main</text></g><g><title>java.lang.Thread.sleep (30,016,060,543 samples, 70.59%)</title><rect x="23.5959%" y="485" width="70.5899%" height="15" fill="rgb(216,20,37)" fg:x="10033374163" fg:w="30016060543"/><text x="23.8459%" y="495.50">java.lang.Thread.sleep</text></g><g><title>java.lang.ClassLoader.loadClass (4,641,374 samples, 0.01%)</title><rect x="94.1861%" y="501" width="0.0109%" height="15" fill="rgb(206,188,39)" fg:x="40049551537" fg:w="4641374"/><text x="94.4361%" y="511.50"></text></g><g><title>java.lang.Thread.exit (7,694,710 samples, 0.02%)</title><rect x="94.2023%" y="501" width="0.0181%" height="15" fill="rgb(217,207,13)" fg:x="40056464988" fg:w="7694710"/><text x="94.4523%" y="511.50"></text></g><g><title>jdk.internal.misc.TerminatingThreadLocal.threadTerminated (5,390,210 samples, 0.01%)</title><rect x="94.2077%" y="485" width="0.0127%" height="15" fill="rgb(231,73,38)" fg:x="40058769488" fg:w="5390210"/><text x="94.4577%" y="495.50"></text></g><g><title>java.lang.ClassLoader.defineClass1 (12,785,297 samples, 0.03%)</title><rect x="95.7093%" y="325" width="0.0301%" height="15" fill="rgb(225,20,46)" fg:x="40697262239" fg:w="12785297"/><text x="95.9593%" y="335.50"></text></g><g><title>java.lang.ClassLoader.loadClass (10,530,836 samples, 0.02%)</title><rect x="95.7146%" y="309" width="0.0248%" height="15" fill="rgb(210,31,41)" fg:x="40699516700" fg:w="10530836"/><text x="95.9646%" y="319.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.loadClass (9,114,919 samples, 0.02%)</title><rect x="95.7179%" y="293" width="0.0214%" height="15" fill="rgb(221,200,47)" fg:x="40700932617" fg:w="9114919"/><text x="95.9679%" y="303.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.loadClassOrNull (7,707,919 samples, 0.02%)</title><rect x="95.7212%" y="277" width="0.0181%" height="15" fill="rgb(226,26,5)" fg:x="40702339617" fg:w="7707919"/><text x="95.9712%" y="287.50"></text></g><g><title>java.net.URL.toString (5,137,832 samples, 0.01%)</title><rect x="95.7417%" y="309" width="0.0121%" height="15" fill="rgb(249,33,26)" fg:x="40711051703" fg:w="5137832"/><text x="95.9917%" y="319.50"></text></g><g><title>java.lang.ClassLoader.defineClassSourceLocation (6,142,750 samples, 0.01%)</title><rect x="95.7394%" y="325" width="0.0144%" height="15" fill="rgb(235,183,28)" fg:x="40710047536" fg:w="6142750"/><text x="95.9894%" y="335.50"></text></g><g><title>java.lang.ClassLoader.defineClass (27,585,004 samples, 0.06%)</title><rect x="95.7003%" y="341" width="0.0649%" height="15" fill="rgb(221,5,38)" fg:x="40693447822" fg:w="27585004"/><text x="95.9503%" y="351.50"></text></g><g><title>java.security.SecureClassLoader$CodeSourceKey.hashCode (5,069,963 samples, 0.01%)</title><rect x="95.7742%" y="309" width="0.0119%" height="15" fill="rgb(247,18,42)" fg:x="40724862699" fg:w="5069963"/><text x="96.0242%" y="319.50"></text></g><g><title>java.util.Objects.hashCode (4,303,629 samples, 0.01%)</title><rect x="95.7760%" y="293" width="0.0101%" height="15" fill="rgb(241,131,45)" fg:x="40725629033" fg:w="4303629"/><text x="96.0260%" y="303.50"></text></g><g><title>java.security.SecureClassLoader.defineClass (41,742,755 samples, 0.10%)</title><rect x="95.6883%" y="357" width="0.0982%" height="15" fill="rgb(249,31,29)" fg:x="40688315156" fg:w="41742755"/><text x="95.9383%" y="367.50"></text></g><g><title>java.security.SecureClassLoader.getProtectionDomain (9,025,085 samples, 0.02%)</title><rect x="95.7652%" y="341" width="0.0212%" height="15" fill="rgb(225,111,53)" fg:x="40721032826" fg:w="9025085"/><text x="96.0152%" y="351.50"></text></g><g><title>java.util.concurrent.ConcurrentHashMap.computeIfAbsent (7,689,918 samples, 0.02%)</title><rect x="95.7683%" y="325" width="0.0181%" height="15" fill="rgb(238,160,17)" fg:x="40722367993" fg:w="7689918"/><text x="96.0183%" y="335.50"></text></g><g><title>jdk.internal.loader.ClassLoaders$AppClassLoader.defineOrCheckPackage (8,445,198 samples, 0.02%)</title><rect x="95.7864%" y="357" width="0.0199%" height="15" fill="rgb(214,148,48)" fg:x="40730057911" fg:w="8445198"/><text x="96.0364%" y="367.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.defineOrCheckPackage (7,010,740 samples, 0.02%)</title><rect x="95.7898%" y="341" width="0.0165%" height="15" fill="rgb(232,36,49)" fg:x="40731492369" fg:w="7010740"/><text x="96.0398%" y="351.50"></text></g><g><title>jdk.internal.loader.Resource.getByteBuffer (15,286,504 samples, 0.04%)</title><rect x="95.8063%" y="357" width="0.0359%" height="15" fill="rgb(209,103,24)" fg:x="40738503109" fg:w="15286504"/><text x="96.0563%" y="367.50"></text></g><g><title>jdk.internal.loader.Resource.cachedInputStream (13,545,629 samples, 0.03%)</title><rect x="95.8104%" y="341" width="0.0319%" height="15" fill="rgb(229,88,8)" fg:x="40740243984" fg:w="13545629"/><text x="96.0604%" y="351.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader$1.getInputStream (11,815,004 samples, 0.03%)</title><rect x="95.8145%" y="325" width="0.0278%" height="15" fill="rgb(213,181,19)" fg:x="40741974609" fg:w="11815004"/><text x="96.0645%" y="335.50"></text></g><g><title>java.util.jar.JarFile.getInputStream (10,092,629 samples, 0.02%)</title><rect x="95.8185%" y="309" width="0.0237%" height="15" fill="rgb(254,191,54)" fg:x="40743696984" fg:w="10092629"/><text x="96.0685%" y="319.50"></text></g><g><title>java.util.zip.ZipFile.getInputStream (8,382,296 samples, 0.02%)</title><rect x="95.8225%" y="293" width="0.0197%" height="15" fill="rgb(241,83,37)" fg:x="40745407317" fg:w="8382296"/><text x="96.0725%" y="303.50"></text></g><g><title>java.io.File.&lt;init&gt; (6,355,328 samples, 0.01%)</title><rect x="95.9230%" y="245" width="0.0149%" height="15" fill="rgb(233,36,39)" fg:x="40788129154" fg:w="6355328"/><text x="96.1730%" y="255.50"></text></g><g><title>java.lang.String.hashCode (6,699,202 samples, 0.02%)</title><rect x="95.9636%" y="181" width="0.0158%" height="15" fill="rgb(226,3,54)" fg:x="40805398063" fg:w="6699202"/><text x="96.2136%" y="191.50"></text></g><g><title>java.lang.StringLatin1.hashCode (5,323,202 samples, 0.01%)</title><rect x="95.9668%" y="165" width="0.0125%" height="15" fill="rgb(245,192,40)" fg:x="40806774063" fg:w="5323202"/><text x="96.2168%" y="175.50"></text></g><g><title>java.util.concurrent.ConcurrentHashMap.compute (9,367,245 samples, 0.02%)</title><rect x="95.9594%" y="197" width="0.0220%" height="15" fill="rgb(238,167,29)" fg:x="40803609313" fg:w="9367245"/><text x="96.2094%" y="207.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.acquireNativeLibraryLock (11,469,495 samples, 0.03%)</title><rect x="95.9549%" y="213" width="0.0270%" height="15" fill="rgb(232,182,51)" fg:x="40801703188" fg:w="11469495"/><text x="96.2049%" y="223.50"></text></g><g><title>java.util.zip.CRC32.&lt;clinit&gt; (54,750,570 samples, 0.13%)</title><rect x="95.8565%" y="341" width="0.1288%" height="15" fill="rgb(231,60,39)" fg:x="40759869238" fg:w="54750570"/><text x="96.1065%" y="351.50"></text></g><g><title>java.util.zip.ZipUtils.loadLibrary (49,993,904 samples, 0.12%)</title><rect x="95.8677%" y="325" width="0.1176%" height="15" fill="rgb(208,69,12)" fg:x="40764625904" fg:w="49993904"/><text x="96.1177%" y="335.50"></text></g><g><title>jdk.internal.loader.BootLoader.loadLibrary (45,270,529 samples, 0.11%)</title><rect x="95.8788%" y="309" width="0.1065%" height="15" fill="rgb(235,93,37)" fg:x="40769349279" fg:w="45270529"/><text x="96.1288%" y="319.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (40,555,071 samples, 0.10%)</title><rect x="95.8899%" y="293" width="0.0954%" height="15" fill="rgb(213,116,39)" fg:x="40774064737" fg:w="40555071"/><text x="96.1399%" y="303.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (35,857,571 samples, 0.08%)</title><rect x="95.9010%" y="277" width="0.0843%" height="15" fill="rgb(222,207,29)" fg:x="40778762237" fg:w="35857571"/><text x="96.1510%" y="287.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.findFromPaths (31,169,154 samples, 0.07%)</title><rect x="95.9120%" y="261" width="0.0733%" height="15" fill="rgb(206,96,30)" fg:x="40783450654" fg:w="31169154"/><text x="96.1620%" y="271.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (20,133,618 samples, 0.05%)</title><rect x="95.9380%" y="245" width="0.0473%" height="15" fill="rgb(218,138,4)" fg:x="40794486190" fg:w="20133618"/><text x="96.1880%" y="255.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (15,481,663 samples, 0.04%)</title><rect x="95.9489%" y="229" width="0.0364%" height="15" fill="rgb(250,191,14)" fg:x="40799138145" fg:w="15481663"/><text x="96.1989%" y="239.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader$1.getBytes (67,227,571 samples, 0.16%)</title><rect x="95.8422%" y="357" width="0.1581%" height="15" fill="rgb(239,60,40)" fg:x="40753789613" fg:w="67227571"/><text x="96.0922%" y="367.50"></text></g><g><title>jdk.internal.loader.Resource.getBytes (5,980,250 samples, 0.01%)</title><rect x="95.9863%" y="341" width="0.0141%" height="15" fill="rgb(206,27,48)" fg:x="40815036934" fg:w="5980250"/><text x="96.2363%" y="351.50"></text></g><g><title>java.util.jar.Attributes$Name.of (6,098,960 samples, 0.01%)</title><rect x="96.1015%" y="229" width="0.0143%" height="15" fill="rgb(225,35,8)" fg:x="40864015432" fg:w="6098960"/><text x="96.3515%" y="239.50"></text></g><g><title>java.util.ImmutableCollections$MapN.get (5,104,418 samples, 0.01%)</title><rect x="96.1038%" y="213" width="0.0120%" height="15" fill="rgb(250,213,24)" fg:x="40865009974" fg:w="5104418"/><text x="96.3538%" y="223.50"></text></g><g><title>java.util.jar.Attributes.putValue (9,143,919 samples, 0.02%)</title><rect x="96.0979%" y="245" width="0.0215%" height="15" fill="rgb(247,123,22)" fg:x="40862509016" fg:w="9143919"/><text x="96.3479%" y="255.50"></text></g><g><title>java.util.jar.Attributes.read (22,496,419 samples, 0.05%)</title><rect x="96.0867%" y="261" width="0.0529%" height="15" fill="rgb(231,138,38)" fg:x="40857749307" fg:w="22496419"/><text x="96.3367%" y="271.50"></text></g><g><title>java.util.jar.Manifest$FastInputStream.readLine (8,591,749 samples, 0.02%)</title><rect x="96.1194%" y="245" width="0.0202%" height="15" fill="rgb(231,145,46)" fg:x="40871653977" fg:w="8591749"/><text x="96.3694%" y="255.50"></text></g><g><title>java.util.jar.Manifest$FastInputStream.readLine (7,408,332 samples, 0.02%)</title><rect x="96.1222%" y="229" width="0.0174%" height="15" fill="rgb(251,118,11)" fg:x="40872837394" fg:w="7408332"/><text x="96.3722%" y="239.50"></text></g><g><title>java.util.jar.Manifest$FastInputStream.fill (6,265,957 samples, 0.01%)</title><rect x="96.1249%" y="213" width="0.0147%" height="15" fill="rgb(217,147,25)" fg:x="40873979769" fg:w="6265957"/><text x="96.3749%" y="223.50"></text></g><g><title>java.util.zip.InflaterInputStream.read (5,187,207 samples, 0.01%)</title><rect x="96.1274%" y="197" width="0.0122%" height="15" fill="rgb(247,81,37)" fg:x="40875058519" fg:w="5187207"/><text x="96.3774%" y="207.50"></text></g><g><title>java.util.jar.Manifest.&lt;init&gt; (36,870,583 samples, 0.09%)</title><rect x="96.0540%" y="309" width="0.0867%" height="15" fill="rgb(209,12,38)" fg:x="40843819810" fg:w="36870583"/><text x="96.3040%" y="319.50"></text></g><g><title>java.util.jar.Manifest.&lt;init&gt; (32,748,250 samples, 0.08%)</title><rect x="96.0637%" y="293" width="0.0770%" height="15" fill="rgb(227,1,9)" fg:x="40847942143" fg:w="32748250"/><text x="96.3137%" y="303.50"></text></g><g><title>java.util.jar.Manifest.read (26,624,669 samples, 0.06%)</title><rect x="96.0781%" y="277" width="0.0626%" height="15" fill="rgb(248,47,43)" fg:x="40854065724" fg:w="26624669"/><text x="96.3281%" y="287.50"></text></g><g><title>java.util.zip.ZipCoder$UTF8ZipCoder.compare (5,244,709 samples, 0.01%)</title><rect x="96.1550%" y="277" width="0.0123%" height="15" fill="rgb(221,10,30)" fg:x="40886769853" fg:w="5244709"/><text x="96.4050%" y="287.50"></text></g><g><title>java.util.zip.ZipFile$Source.getEntryPos (7,362,252 samples, 0.02%)</title><rect x="96.1518%" y="293" width="0.0173%" height="15" fill="rgb(210,229,1)" fg:x="40885398894" fg:w="7362252"/><text x="96.4018%" y="303.50"></text></g><g><title>java.util.zip.ZipFile.getInputStream (16,826,623 samples, 0.04%)</title><rect x="96.1437%" y="309" width="0.0396%" height="15" fill="rgb(222,148,37)" fg:x="40881981896" fg:w="16826623"/><text x="96.3937%" y="319.50"></text></g><g><title>java.util.jar.JarFile.getManifest (70,136,126 samples, 0.16%)</title><rect x="96.0183%" y="341" width="0.1649%" height="15" fill="rgb(234,67,33)" fg:x="40828672726" fg:w="70136126"/><text x="96.2683%" y="351.50"></text></g><g><title>java.util.jar.JarFile.getManifestFromReference (62,587,334 samples, 0.15%)</title><rect x="96.0361%" y="325" width="0.1472%" height="15" fill="rgb(247,98,35)" fg:x="40836221518" fg:w="62587334"/><text x="96.2861%" y="335.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.defineClass (236,024,069 samples, 0.56%)</title><rect x="95.6286%" y="373" width="0.5551%" height="15" fill="rgb(247,138,52)" fg:x="40662946116" fg:w="236024069"/><text x="95.8786%" y="383.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader$1.getManifest (77,921,126 samples, 0.18%)</title><rect x="96.0004%" y="357" width="0.1833%" height="15" fill="rgb(213,79,30)" fg:x="40821049059" fg:w="77921126"/><text x="96.2504%" y="367.50"></text></g><g><title>java.util.zip.ZipCoder$UTF8ZipCoder.compare (5,284,208 samples, 0.01%)</title><rect x="96.3011%" y="277" width="0.0124%" height="15" fill="rgb(246,177,23)" fg:x="40948889518" fg:w="5284208"/><text x="96.5511%" y="287.50"></text></g><g><title>java.util.zip.ZipFile$Source.getEntryPos (9,470,913 samples, 0.02%)</title><rect x="96.2971%" y="293" width="0.0223%" height="15" fill="rgb(230,62,27)" fg:x="40947209935" fg:w="9470913"/><text x="96.5471%" y="303.50"></text></g><g><title>java.util.jar.JarFile.getJarEntry (28,536,205 samples, 0.07%)</title><rect x="96.2718%" y="341" width="0.0671%" height="15" fill="rgb(216,154,8)" fg:x="40936456227" fg:w="28536205"/><text x="96.5218%" y="351.50"></text></g><g><title>java.util.jar.JarFile.getEntry (24,940,955 samples, 0.06%)</title><rect x="96.2803%" y="325" width="0.0587%" height="15" fill="rgb(244,35,45)" fg:x="40940051477" fg:w="24940955"/><text x="96.5303%" y="335.50"></text></g><g><title>java.util.zip.ZipFile.getEntry (21,343,747 samples, 0.05%)</title><rect x="96.2887%" y="309" width="0.0502%" height="15" fill="rgb(251,115,12)" fg:x="40943648685" fg:w="21343747"/><text x="96.5387%" y="319.50"></text></g><g><title>java.util.zip.ZipFile.getZipEntry (8,311,293 samples, 0.02%)</title><rect x="96.3194%" y="293" width="0.0195%" height="15" fill="rgb(240,54,50)" fg:x="40956681139" fg:w="8311293"/><text x="96.5694%" y="303.50"></text></g><g><title>java.net.URL.&lt;init&gt; (15,887,120 samples, 0.04%)</title><rect x="96.3481%" y="325" width="0.0374%" height="15" fill="rgb(233,84,52)" fg:x="40968890016" fg:w="15887120"/><text x="96.5981%" y="335.50"></text></g><g><title>java.net.URL.&lt;init&gt; (13,111,286 samples, 0.03%)</title><rect x="96.3546%" y="309" width="0.0308%" height="15" fill="rgb(207,117,47)" fg:x="40971665850" fg:w="13111286"/><text x="96.6046%" y="319.50"></text></g><g><title>sun.net.www.protocol.jar.Handler.parseURL (9,498,872 samples, 0.02%)</title><rect x="96.3631%" y="293" width="0.0223%" height="15" fill="rgb(249,43,39)" fg:x="40975278264" fg:w="9498872"/><text x="96.6131%" y="303.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader.createResource (23,363,165 samples, 0.05%)</title><rect x="96.3389%" y="341" width="0.0549%" height="15" fill="rgb(209,38,44)" fg:x="40964992432" fg:w="23363165"/><text x="96.5889%" y="351.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader.getResource (59,417,537 samples, 0.14%)</title><rect x="96.2541%" y="357" width="0.1397%" height="15" fill="rgb(236,212,23)" fg:x="40928938310" fg:w="59417537"/><text x="96.5041%" y="367.50"></text></g><g><title>java.util.HashMap.put (4,536,998 samples, 0.01%)</title><rect x="96.4470%" y="341" width="0.0107%" height="15" fill="rgb(242,79,21)" fg:x="41010938932" fg:w="4536998"/><text x="96.6970%" y="351.50"></text></g><g><title>java.io.InputStream.readNBytes (5,401,375 samples, 0.01%)</title><rect x="96.5435%" y="261" width="0.0127%" height="15" fill="rgb(211,96,35)" fg:x="41051985721" fg:w="5401375"/><text x="96.7935%" y="271.50"></text></g><g><title>java.util.zip.InflaterInputStream.read (4,450,042 samples, 0.01%)</title><rect x="96.5458%" y="245" width="0.0105%" height="15" fill="rgb(253,215,40)" fg:x="41052937054" fg:w="4450042"/><text x="96.7958%" y="255.50"></text></g><g><title>java.util.jar.JarFile.getBytes (21,962,340 samples, 0.05%)</title><rect x="96.5352%" y="277" width="0.0516%" height="15" fill="rgb(211,81,21)" fg:x="41048455638" fg:w="21962340"/><text x="96.7852%" y="287.50"></text></g><g><title>java.util.zip.ZipFile.getInputStream (11,588,092 samples, 0.03%)</title><rect x="96.5596%" y="261" width="0.0273%" height="15" fill="rgb(208,190,38)" fg:x="41058829886" fg:w="11588092"/><text x="96.8096%" y="271.50"></text></g><g><title>java.util.zip.ZipCoder$UTF8ZipCoder.compare (5,977,254 samples, 0.01%)</title><rect x="96.6172%" y="229" width="0.0141%" height="15" fill="rgb(235,213,38)" fg:x="41083324062" fg:w="5977254"/><text x="96.8672%" y="239.50"></text></g><g><title>java.util.Arrays.mismatch (4,520,463 samples, 0.01%)</title><rect x="96.6206%" y="213" width="0.0106%" height="15" fill="rgb(237,122,38)" fg:x="41084780853" fg:w="4520463"/><text x="96.8706%" y="223.50"></text></g><g><title>java.util.zip.ZipFile$Source.getEntryPos (10,622,297 samples, 0.02%)</title><rect x="96.6127%" y="245" width="0.0250%" height="15" fill="rgb(244,218,35)" fg:x="41081411270" fg:w="10622297"/><text x="96.8627%" y="255.50"></text></g><g><title>java.util.jar.JarFile.getManEntry (31,299,047 samples, 0.07%)</title><rect x="96.5869%" y="277" width="0.0736%" height="15" fill="rgb(240,68,47)" fg:x="41070417978" fg:w="31299047"/><text x="96.8369%" y="287.50"></text></g><g><title>java.util.zip.ZipFile.getEntry (24,412,088 samples, 0.06%)</title><rect x="96.6031%" y="261" width="0.0574%" height="15" fill="rgb(210,16,53)" fg:x="41077304937" fg:w="24412088"/><text x="96.8531%" y="271.50"></text></g><g><title>java.util.zip.ZipFile.getZipEntry (9,683,125 samples, 0.02%)</title><rect x="96.6377%" y="245" width="0.0228%" height="15" fill="rgb(235,124,12)" fg:x="41092033900" fg:w="9683125"/><text x="96.8877%" y="255.50"></text></g><g><title>java.util.jar.JavaUtilJarAccessImpl.jarFileHasClassPathAttribute (78,074,553 samples, 0.18%)</title><rect x="96.4771%" y="325" width="0.1836%" height="15" fill="rgb(224,169,11)" fg:x="41023750721" fg:w="78074553"/><text x="96.7271%" y="335.50"></text></g><g><title>java.util.jar.JarFile.hasClassPathAttribute (69,830,553 samples, 0.16%)</title><rect x="96.4965%" y="309" width="0.1642%" height="15" fill="rgb(250,166,2)" fg:x="41031994721" fg:w="69830553"/><text x="96.7465%" y="319.50"></text></g><g><title>java.util.jar.JarFile.checkForSpecialAttributes (61,595,553 samples, 0.14%)</title><rect x="96.5159%" y="293" width="0.1449%" height="15" fill="rgb(242,216,29)" fg:x="41040229721" fg:w="61595553"/><text x="96.7659%" y="303.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader.getClassPath (86,350,095 samples, 0.20%)</title><rect x="96.4577%" y="341" width="0.2031%" height="15" fill="rgb(230,116,27)" fg:x="41015475930" fg:w="86350095"/><text x="96.7077%" y="351.50"></text></g><g><title>java.lang.String.valueOf (6,580,377 samples, 0.02%)</title><rect x="96.7250%" y="293" width="0.0155%" height="15" fill="rgb(228,99,48)" fg:x="41129146862" fg:w="6580377"/><text x="96.9750%" y="303.50"></text></g><g><title>java.net.URL.toString (5,521,544 samples, 0.01%)</title><rect x="96.7275%" y="277" width="0.0130%" height="15" fill="rgb(253,11,6)" fg:x="41130205695" fg:w="5521544"/><text x="96.9775%" y="287.50"></text></g><g><title>java.net.URL.toExternalForm (4,472,253 samples, 0.01%)</title><rect x="96.7299%" y="261" width="0.0105%" height="15" fill="rgb(247,143,39)" fg:x="41131254986" fg:w="4472253"/><text x="96.9799%" y="271.50"></text></g><g><title>java.lang.StringBuilder.append (8,871,088 samples, 0.02%)</title><rect x="96.7209%" y="309" width="0.0209%" height="15" fill="rgb(236,97,10)" fg:x="41127404944" fg:w="8871088"/><text x="96.9709%" y="319.50"></text></g><g><title>java.nio.file.Files.readAttributes (10,222,376 samples, 0.02%)</title><rect x="96.8985%" y="197" width="0.0240%" height="15" fill="rgb(233,208,19)" fg:x="41202910359" fg:w="10222376"/><text x="97.1485%" y="207.50"></text></g><g><title>sun.nio.fs.UnixFileSystemProvider.readAttributes (8,860,417 samples, 0.02%)</title><rect x="96.9017%" y="181" width="0.0208%" height="15" fill="rgb(216,164,2)" fg:x="41204272318" fg:w="8860417"/><text x="97.1517%" y="191.50"></text></g><g><title>sun.nio.fs.UnixFileAttributeViews$Basic.readAttributes (7,319,540 samples, 0.02%)</title><rect x="96.9053%" y="165" width="0.0172%" height="15" fill="rgb(220,129,5)" fg:x="41205813195" fg:w="7319540"/><text x="97.1553%" y="175.50"></text></g><g><title>sun.nio.fs.UnixFileAttributes.get (6,126,414 samples, 0.01%)</title><rect x="96.9081%" y="149" width="0.0144%" height="15" fill="rgb(242,17,10)" fg:x="41207006321" fg:w="6126414"/><text x="97.1581%" y="159.50"></text></g><g><title>sun.nio.fs.UnixNativeDispatcher.stat (5,087,789 samples, 0.01%)</title><rect x="96.9105%" y="133" width="0.0120%" height="15" fill="rgb(242,107,0)" fg:x="41208044946" fg:w="5087789"/><text x="97.1605%" y="143.50"></text></g><g><title>java.util.HashMap.get (4,490,377 samples, 0.01%)</title><rect x="96.9225%" y="197" width="0.0106%" height="15" fill="rgb(251,28,31)" fg:x="41213132735" fg:w="4490377"/><text x="97.1725%" y="207.50"></text></g><g><title>java.lang.String.charAt (5,292,884 samples, 0.01%)</title><rect x="96.9662%" y="149" width="0.0124%" height="15" fill="rgb(233,223,10)" fg:x="41231728320" fg:w="5292884"/><text x="97.2162%" y="159.50"></text></g><g><title>java.util.zip.ZipFile$Source.get (40,958,303 samples, 0.10%)</title><rect x="96.8824%" y="213" width="0.0963%" height="15" fill="rgb(215,21,27)" fg:x="41196089485" fg:w="40958303"/><text x="97.1324%" y="223.50"></text></g><g><title>sun.nio.fs.UnixFileSystem.getPath (19,398,176 samples, 0.05%)</title><rect x="96.9331%" y="197" width="0.0456%" height="15" fill="rgb(232,23,21)" fg:x="41217649612" fg:w="19398176"/><text x="97.1831%" y="207.50"></text></g><g><title>sun.nio.fs.UnixPath.&lt;init&gt; (14,784,218 samples, 0.03%)</title><rect x="96.9440%" y="181" width="0.0348%" height="15" fill="rgb(244,5,23)" fg:x="41222263570" fg:w="14784218"/><text x="97.1940%" y="191.50"></text></g><g><title>sun.nio.fs.UnixPath.normalizeAndCheck (9,700,093 samples, 0.02%)</title><rect x="96.9559%" y="165" width="0.0228%" height="15" fill="rgb(226,81,46)" fg:x="41227347695" fg:w="9700093"/><text x="97.2059%" y="175.50"></text></g><g><title>java.util.zip.ZipFile$CleanableResource.&lt;init&gt; (49,981,261 samples, 0.12%)</title><rect x="96.8612%" y="229" width="0.1175%" height="15" fill="rgb(247,70,30)" fg:x="41187066735" fg:w="49981261"/><text x="97.1112%" y="239.50"></text></g><g><title>java.util.jar.JarFile.&lt;init&gt; (81,485,468 samples, 0.19%)</title><rect x="96.7925%" y="277" width="0.1916%" height="15" fill="rgb(212,68,19)" fg:x="41157838530" fg:w="81485468"/><text x="97.0425%" y="287.50"></text></g><g><title>java.util.zip.ZipFile.&lt;init&gt; (72,421,885 samples, 0.17%)</title><rect x="96.8138%" y="261" width="0.1703%" height="15" fill="rgb(240,187,13)" fg:x="41166902113" fg:w="72421885"/><text x="97.0638%" y="271.50"></text></g><g><title>java.util.zip.ZipFile.&lt;init&gt; (63,532,343 samples, 0.15%)</title><rect x="96.8347%" y="245" width="0.1494%" height="15" fill="rgb(223,113,26)" fg:x="41175791655" fg:w="63532343"/><text x="97.0847%" y="255.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader.ensureOpen (105,456,297 samples, 0.25%)</title><rect x="96.7422%" y="309" width="0.2480%" height="15" fill="rgb(206,192,2)" fg:x="41136484239" fg:w="105456297"/><text x="96.9922%" y="319.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader.getJarFile (95,348,964 samples, 0.22%)</title><rect x="96.7660%" y="293" width="0.2242%" height="15" fill="rgb(241,108,4)" fg:x="41146591572" fg:w="95348964"/><text x="97.0160%" y="303.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader.newURL (4,535,538 samples, 0.01%)</title><rect x="96.9902%" y="309" width="0.0107%" height="15" fill="rgb(247,173,49)" fg:x="41241940536" fg:w="4535538"/><text x="97.2402%" y="319.50"></text></g><g><title>jdk.internal.loader.URLClassPath.getLoader (144,659,757 samples, 0.34%)</title><rect x="96.6607%" y="341" width="0.3402%" height="15" fill="rgb(224,114,35)" fg:x="41101826025" fg:w="144659757"/><text x="96.9107%" y="351.50"></text></g><g><title>jdk.internal.loader.URLClassPath$JarLoader.&lt;init&gt; (131,701,589 samples, 0.31%)</title><rect x="96.6912%" y="325" width="0.3097%" height="15" fill="rgb(245,159,27)" fg:x="41114784193" fg:w="131701589"/><text x="96.9412%" y="335.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.findClassOnClassPathOrNull (638,939,374 samples, 1.50%)</title><rect x="95.5025%" y="389" width="1.5026%" height="15" fill="rgb(245,172,44)" fg:x="40609324198" fg:w="638939374"/><text x="95.7525%" y="399.50"></text></g><g><title>jdk.internal.loader.URLClassPath.getResource (349,293,387 samples, 0.82%)</title><rect x="96.1837%" y="373" width="0.8214%" height="15" fill="rgb(236,23,11)" fg:x="40898970185" fg:w="349293387"/><text x="96.4337%" y="383.50"></text></g><g><title>jdk.internal.loader.URLClassPath.getLoader (259,907,725 samples, 0.61%)</title><rect x="96.3939%" y="357" width="0.6112%" height="15" fill="rgb(205,117,38)" fg:x="40988355847" fg:w="259907725"/><text x="96.6439%" y="367.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.loadClassOrNull (4,584,090 samples, 0.01%)</title><rect x="97.0082%" y="389" width="0.0108%" height="15" fill="rgb(237,72,25)" fg:x="41249567860" fg:w="4584090"/><text x="97.2582%" y="399.50"></text></g><g><title>java.lang.Class.forName (919,581,416 samples, 2.16%)</title><rect x="94.8564%" y="469" width="2.1626%" height="15" fill="rgb(244,70,9)" fg:x="40334570867" fg:w="919581416"/><text x="95.1064%" y="479.50">j..</text></g><g><title>java.lang.Class.forName0 (865,021,916 samples, 2.03%)</title><rect x="94.9847%" y="453" width="2.0343%" height="15" fill="rgb(217,125,39)" fg:x="40389130367" fg:w="865021916"/><text x="95.2347%" y="463.50">j..</text></g><g><title>java.lang.ClassLoader.loadClass (810,465,874 samples, 1.91%)</title><rect x="95.1130%" y="437" width="1.9060%" height="15" fill="rgb(235,36,10)" fg:x="40443686409" fg:w="810465874"/><text x="95.3630%" y="447.50">j..</text></g><g><title>jdk.internal.loader.BuiltinClassLoader.loadClass (755,923,499 samples, 1.78%)</title><rect x="95.2412%" y="421" width="1.7777%" height="15" fill="rgb(251,123,47)" fg:x="40498228784" fg:w="755923499"/><text x="95.4912%" y="431.50">j..</text></g><g><title>jdk.internal.loader.BuiltinClassLoader.loadClassOrNull (701,385,833 samples, 1.65%)</title><rect x="95.3695%" y="405" width="1.6495%" height="15" fill="rgb(221,13,13)" fg:x="40552766450" fg:w="701385833"/><text x="95.6195%" y="415.50"></text></g><g><title>java.util.jar.JarFile.&lt;clinit&gt; (7,499,164 samples, 0.02%)</title><rect x="97.0190%" y="469" width="0.0176%" height="15" fill="rgb(238,131,9)" fg:x="41254172449" fg:w="7499164"/><text x="97.2690%" y="479.50"></text></g><g><title>jdk.internal.loader.ClassLoaderHelper.parsePath (6,185,081 samples, 0.01%)</title><rect x="98.3325%" y="133" width="0.0145%" height="15" fill="rgb(211,50,8)" fg:x="41812673229" fg:w="6185081"/><text x="98.5825%" y="143.50"></text></g><g><title>jdk.internal.loader.NativeLibraries$LibraryPaths.&lt;clinit&gt; (8,787,997 samples, 0.02%)</title><rect x="98.3263%" y="149" width="0.0207%" height="15" fill="rgb(245,182,24)" fg:x="41810071646" fg:w="8787997"/><text x="98.5763%" y="159.50"></text></g><g><title>java.io.File.&lt;init&gt; (7,956,753 samples, 0.02%)</title><rect x="98.3724%" y="133" width="0.0187%" height="15" fill="rgb(242,14,37)" fg:x="41829644143" fg:w="7956753"/><text x="98.6224%" y="143.50"></text></g><g><title>jdk.internal.loader.NativeLibraries$NativeLibraryImpl.open (8,905,087 samples, 0.02%)</title><rect x="98.4476%" y="101" width="0.0209%" height="15" fill="rgb(246,228,12)" fg:x="41861629809" fg:w="8905087"/><text x="98.6976%" y="111.50"></text></g><g><title>java.lang.String.hashCode (8,357,291 samples, 0.02%)</title><rect x="98.4806%" y="69" width="0.0197%" height="15" fill="rgb(213,55,15)" fg:x="41875663812" fg:w="8357291"/><text x="98.7306%" y="79.50"></text></g><g><title>java.lang.StringLatin1.hashCode (6,640,209 samples, 0.02%)</title><rect x="98.4846%" y="53" width="0.0156%" height="15" fill="rgb(209,9,3)" fg:x="41877380894" fg:w="6640209"/><text x="98.7346%" y="63.50"></text></g><g><title>jdk.internal.util.ArraysSupport.hashCodeOfUnsigned (4,957,084 samples, 0.01%)</title><rect x="98.4886%" y="37" width="0.0117%" height="15" fill="rgb(230,59,30)" fg:x="41879064019" fg:w="4957084"/><text x="98.7386%" y="47.50"></text></g><g><title>java.util.concurrent.ConcurrentHashMap.compute (12,989,122 samples, 0.03%)</title><rect x="98.4748%" y="85" width="0.0305%" height="15" fill="rgb(209,121,21)" fg:x="41873185979" fg:w="12989122"/><text x="98.7248%" y="95.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.acquireNativeLibraryLock (15,905,747 samples, 0.04%)</title><rect x="98.4685%" y="101" width="0.0374%" height="15" fill="rgb(220,109,13)" fg:x="41870534896" fg:w="15905747"/><text x="98.7185%" y="111.50"></text></g><g><title>jdk.internal.loader.BootLoader.loadLibrary (118,497,828 samples, 0.28%)</title><rect x="98.2316%" y="197" width="0.2787%" height="15" fill="rgb(232,18,1)" fg:x="41769765272" fg:w="118497828"/><text x="98.4816%" y="207.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (105,038,704 samples, 0.25%)</title><rect x="98.2632%" y="181" width="0.2470%" height="15" fill="rgb(215,41,42)" fg:x="41783224396" fg:w="105038704"/><text x="98.5132%" y="191.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (91,608,413 samples, 0.22%)</title><rect x="98.2948%" y="165" width="0.2154%" height="15" fill="rgb(224,123,36)" fg:x="41796654687" fg:w="91608413"/><text x="98.5448%" y="175.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.findFromPaths (69,403,457 samples, 0.16%)</title><rect x="98.3470%" y="149" width="0.1632%" height="15" fill="rgb(240,125,3)" fg:x="41818859643" fg:w="69403457"/><text x="98.5970%" y="159.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (50,651,204 samples, 0.12%)</title><rect x="98.3911%" y="133" width="0.1191%" height="15" fill="rgb(205,98,50)" fg:x="41837611896" fg:w="50651204"/><text x="98.6411%" y="143.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (39,804,537 samples, 0.09%)</title><rect x="98.4166%" y="117" width="0.0936%" height="15" fill="rgb(205,185,37)" fg:x="41848458563" fg:w="39804537"/><text x="98.6666%" y="127.50"></text></g><g><title>sun.nio.fs.UnixNativeDispatcher.&lt;clinit&gt; (139,143,790 samples, 0.33%)</title><rect x="98.1970%" y="213" width="0.3272%" height="15" fill="rgb(238,207,15)" fg:x="41755093856" fg:w="139143790"/><text x="98.4470%" y="223.50"></text></g><g><title>sun.nio.fs.UnixNativeDispatcher.init (5,974,546 samples, 0.01%)</title><rect x="98.5102%" y="197" width="0.0141%" height="15" fill="rgb(213,199,42)" fg:x="41888263100" fg:w="5974546"/><text x="98.7602%" y="207.50"></text></g><g><title>java.lang.ClassLoader.findNative (4,788,796 samples, 0.01%)</title><rect x="98.5130%" y="181" width="0.0113%" height="15" fill="rgb(235,201,11)" fg:x="41889448850" fg:w="4788796"/><text x="98.7630%" y="191.50"></text></g><g><title>sun.nio.fs.UnixNativeDispatcher.getcwd (5,573,332 samples, 0.01%)</title><rect x="98.5243%" y="213" width="0.0131%" height="15" fill="rgb(207,46,11)" fg:x="41894237646" fg:w="5573332"/><text x="98.7743%" y="223.50"></text></g><g><title>java.lang.ClassLoader.findNative (4,469,582 samples, 0.01%)</title><rect x="98.5269%" y="197" width="0.0105%" height="15" fill="rgb(241,35,35)" fg:x="41895341396" fg:w="4469582"/><text x="98.7769%" y="207.50"></text></g><g><title>sun.nio.fs.UnixPath.normalizeAndCheck (7,245,756 samples, 0.02%)</title><rect x="98.5398%" y="213" width="0.0170%" height="15" fill="rgb(243,32,47)" fg:x="41900854858" fg:w="7245756"/><text x="98.7898%" y="223.50"></text></g><g><title>sun.nio.fs.MacOSXFileSystem.&lt;init&gt; (213,848,676 samples, 0.50%)</title><rect x="98.0550%" y="261" width="0.5029%" height="15" fill="rgb(247,202,23)" fg:x="41694707480" fg:w="213848676"/><text x="98.3050%" y="271.50"></text></g><g><title>sun.nio.fs.BsdFileSystem.&lt;init&gt; (193,902,343 samples, 0.46%)</title><rect x="98.1019%" y="245" width="0.4560%" height="15" fill="rgb(219,102,11)" fg:x="41714653813" fg:w="193902343"/><text x="98.3519%" y="255.50"></text></g><g><title>sun.nio.fs.UnixFileSystem.&lt;init&gt; (173,965,884 samples, 0.41%)</title><rect x="98.1488%" y="229" width="0.4091%" height="15" fill="rgb(243,110,44)" fg:x="41734590272" fg:w="173965884"/><text x="98.3988%" y="239.50"></text></g><g><title>sun.nio.fs.MacOSXFileSystemProvider.&lt;init&gt; (315,314,631 samples, 0.74%)</title><rect x="97.8165%" y="341" width="0.7415%" height="15" fill="rgb(222,74,54)" fg:x="41593279483" fg:w="315314631"/><text x="98.0665%" y="351.50"></text></g><g><title>sun.nio.fs.BsdFileSystemProvider.&lt;init&gt; (295,089,298 samples, 0.69%)</title><rect x="97.8641%" y="325" width="0.6940%" height="15" fill="rgb(216,99,12)" fg:x="41613504816" fg:w="295089298"/><text x="98.1141%" y="335.50"></text></g><g><title>sun.nio.fs.UnixFileSystemProvider.&lt;init&gt; (274,871,007 samples, 0.65%)</title><rect x="97.9116%" y="309" width="0.6464%" height="15" fill="rgb(226,22,26)" fg:x="41633723107" fg:w="274871007"/><text x="98.1616%" y="319.50"></text></g><g><title>sun.nio.fs.MacOSXFileSystemProvider.newFileSystem (254,632,550 samples, 0.60%)</title><rect x="97.9592%" y="293" width="0.5988%" height="15" fill="rgb(217,163,10)" fg:x="41653961564" fg:w="254632550"/><text x="98.2092%" y="303.50"></text></g><g><title>sun.nio.fs.MacOSXFileSystemProvider.newFileSystem (234,464,800 samples, 0.55%)</title><rect x="98.0066%" y="277" width="0.5514%" height="15" fill="rgb(213,25,53)" fg:x="41674129314" fg:w="234464800"/><text x="98.2566%" y="287.50"></text></g><g><title>sun.nio.fs.DefaultFileSystemProvider.&lt;clinit&gt; (337,546,214 samples, 0.79%)</title><rect x="97.7642%" y="357" width="0.7938%" height="15" fill="rgb(252,105,26)" fg:x="41571048983" fg:w="337546214"/><text x="98.0142%" y="367.50"></text></g><g><title>java.util.zip.ZipFile$Source.&lt;clinit&gt; (358,401,588 samples, 0.84%)</title><rect x="97.7152%" y="373" width="0.8429%" height="15" fill="rgb(220,39,43)" fg:x="41550204984" fg:w="358401588"/><text x="97.9652%" y="383.50"></text></g><g><title>sun.nio.fs.AbstractBasicFileAttributeView.&lt;clinit&gt; (4,561,747 samples, 0.01%)</title><rect x="98.6404%" y="293" width="0.0107%" height="15" fill="rgb(229,68,48)" fg:x="41943620818" fg:w="4561747"/><text x="98.8904%" y="303.50"></text></g><g><title>sun.nio.fs.BsdFileAttributeViews.createBasicView (5,693,705 samples, 0.01%)</title><rect x="98.6379%" y="309" width="0.0134%" height="15" fill="rgb(252,8,32)" fg:x="41942561568" fg:w="5693705"/><text x="98.8879%" y="319.50"></text></g><g><title>sun.nio.fs.BsdFileSystemProvider.getFileAttributeView (6,783,663 samples, 0.02%)</title><rect x="98.6354%" y="325" width="0.0160%" height="15" fill="rgb(223,20,43)" fg:x="41941472485" fg:w="6783663"/><text x="98.8854%" y="335.50"></text></g><g><title>sun.nio.fs.NativeBuffers.getNativeBufferFromCache (13,636,172 samples, 0.03%)</title><rect x="98.7072%" y="261" width="0.0321%" height="15" fill="rgb(229,81,49)" fg:x="41972039361" fg:w="13636172"/><text x="98.9572%" y="271.50"></text></g><g><title>jdk.internal.misc.CarrierThreadLocal.get (12,504,922 samples, 0.03%)</title><rect x="98.7099%" y="245" width="0.0294%" height="15" fill="rgb(236,28,36)" fg:x="41973170611" fg:w="12504922"/><text x="98.9599%" y="255.50"></text></g><g><title>java.lang.System$1.getCarrierThreadLocal (11,384,880 samples, 0.03%)</title><rect x="98.7125%" y="229" width="0.0268%" height="15" fill="rgb(249,185,26)" fg:x="41974290653" fg:w="11384880"/><text x="98.9625%" y="239.50"></text></g><g><title>java.lang.ThreadLocal.getCarrierThreadLocal (10,278,755 samples, 0.02%)</title><rect x="98.7151%" y="213" width="0.0242%" height="15" fill="rgb(249,174,33)" fg:x="41975396778" fg:w="10278755"/><text x="98.9651%" y="223.50"></text></g><g><title>java.lang.ThreadLocal.get (9,185,171 samples, 0.02%)</title><rect x="98.7177%" y="197" width="0.0216%" height="15" fill="rgb(233,201,37)" fg:x="41976490362" fg:w="9185171"/><text x="98.9677%" y="207.50"></text></g><g><title>java.lang.ThreadLocal.setInitialValue (8,118,296 samples, 0.02%)</title><rect x="98.7202%" y="181" width="0.0191%" height="15" fill="rgb(221,78,26)" fg:x="41977557237" fg:w="8118296"/><text x="98.9702%" y="191.50"></text></g><g><title>jdk.internal.misc.TerminatingThreadLocal.register (6,650,251 samples, 0.02%)</title><rect x="98.7237%" y="165" width="0.0156%" height="15" fill="rgb(250,127,30)" fg:x="41979025282" fg:w="6650251"/><text x="98.9737%" y="175.50"></text></g><g><title>jdk.internal.misc.CarrierThreadLocal.get (5,675,919 samples, 0.01%)</title><rect x="98.7260%" y="149" width="0.0133%" height="15" fill="rgb(230,49,44)" fg:x="41979999614" fg:w="5675919"/><text x="98.9760%" y="159.50"></text></g><g><title>java.lang.System$1.getCarrierThreadLocal (4,917,211 samples, 0.01%)</title><rect x="98.7278%" y="133" width="0.0116%" height="15" fill="rgb(229,67,23)" fg:x="41980758322" fg:w="4917211"/><text x="98.9778%" y="143.50"></text></g><g><title>sun.nio.fs.UnixNativeDispatcher.copyToNativeBuffer (21,524,841 samples, 0.05%)</title><rect x="98.6888%" y="277" width="0.0506%" height="15" fill="rgb(249,83,47)" fg:x="41964184941" fg:w="21524841"/><text x="98.9388%" y="287.50"></text></g><g><title>java.nio.file.Files.readAttributes (59,503,877 samples, 0.14%)</title><rect x="98.6107%" y="357" width="0.1399%" height="15" fill="rgb(215,43,3)" fg:x="41930994694" fg:w="59503877"/><text x="98.8607%" y="367.50"></text></g><g><title>sun.nio.fs.UnixFileSystemProvider.readAttributes (54,219,003 samples, 0.13%)</title><rect x="98.6232%" y="341" width="0.1275%" height="15" fill="rgb(238,154,13)" fg:x="41936279568" fg:w="54219003"/><text x="98.8732%" y="351.50"></text></g><g><title>sun.nio.fs.UnixFileAttributeViews$Basic.readAttributes (42,242,423 samples, 0.10%)</title><rect x="98.6513%" y="325" width="0.0993%" height="15" fill="rgb(219,56,2)" fg:x="41948256148" fg:w="42242423"/><text x="98.9013%" y="335.50"></text></g><g><title>sun.nio.fs.UnixFileAttributes.get (38,093,300 samples, 0.09%)</title><rect x="98.6611%" y="309" width="0.0896%" height="15" fill="rgb(233,0,4)" fg:x="41952405271" fg:w="38093300"/><text x="98.9111%" y="319.50"></text></g><g><title>sun.nio.fs.UnixNativeDispatcher.stat (34,054,592 samples, 0.08%)</title><rect x="98.6706%" y="293" width="0.0801%" height="15" fill="rgb(235,30,7)" fg:x="41956443979" fg:w="34054592"/><text x="98.9206%" y="303.50"></text></g><g><title>sun.nio.fs.UnixNativeDispatcher.stat0 (4,788,789 samples, 0.01%)</title><rect x="98.7394%" y="277" width="0.0113%" height="15" fill="rgb(250,79,13)" fg:x="41985709782" fg:w="4788789"/><text x="98.9894%" y="287.50"></text></g><g><title>java.util.zip.ZipFile$Source.checkAndAddEntry (43,648,585 samples, 0.10%)</title><rect x="98.8248%" y="325" width="0.1027%" height="15" fill="rgb(211,146,34)" fg:x="42022008700" fg:w="43648585"/><text x="99.0748%" y="335.50"></text></g><g><title>java.util.zip.ZipFile$Source.nextEntryPos (6,360,586 samples, 0.01%)</title><rect x="98.9352%" y="325" width="0.0150%" height="15" fill="rgb(228,22,38)" fg:x="42068980951" fg:w="6360586"/><text x="99.1852%" y="335.50"></text></g><g><title>java.util.zip.ZipFile$Source.initCEN (66,190,587 samples, 0.16%)</title><rect x="98.7948%" y="341" width="0.1557%" height="15" fill="rgb(235,168,5)" fg:x="42009275825" fg:w="66190587"/><text x="99.0448%" y="351.50"></text></g><g><title>java.util.zip.ZipFile$Source.&lt;init&gt; (81,673,799 samples, 0.19%)</title><rect x="98.7591%" y="357" width="0.1921%" height="15" fill="rgb(221,155,16)" fg:x="41994088072" fg:w="81673799"/><text x="99.0091%" y="367.50"></text></g><g><title>java.util.zip.ZipFile$Source.get (178,576,173 samples, 0.42%)</title><rect x="98.5581%" y="373" width="0.4200%" height="15" fill="rgb(215,215,53)" fg:x="41908606572" fg:w="178576173"/><text x="98.8081%" y="383.50"></text></g><g><title>sun.nio.fs.UnixFileSystem.getPath (11,420,874 samples, 0.03%)</title><rect x="98.9512%" y="357" width="0.0269%" height="15" fill="rgb(223,4,10)" fg:x="42075761871" fg:w="11420874"/><text x="99.2012%" y="367.50"></text></g><g><title>sun.nio.fs.UnixPath.&lt;init&gt; (8,736,207 samples, 0.02%)</title><rect x="98.9575%" y="341" width="0.0205%" height="15" fill="rgb(234,103,6)" fg:x="42078446538" fg:w="8736207"/><text x="99.2075%" y="351.50"></text></g><g><title>sun.nio.fs.UnixPath.normalizeAndCheck (5,755,749 samples, 0.01%)</title><rect x="98.9645%" y="325" width="0.0135%" height="15" fill="rgb(227,97,0)" fg:x="42081426996" fg:w="5755749"/><text x="99.2145%" y="335.50"></text></g><g><title>java.lang.ref.Cleaner.create (6,822,084 samples, 0.02%)</title><rect x="98.9813%" y="357" width="0.0160%" height="15" fill="rgb(234,150,53)" fg:x="42088570746" fg:w="6822084"/><text x="99.2313%" y="367.50"></text></g><g><title>jdk.internal.ref.CleanerImpl.start (5,107,460 samples, 0.01%)</title><rect x="98.9853%" y="341" width="0.0120%" height="15" fill="rgb(228,201,54)" fg:x="42090285370" fg:w="5107460"/><text x="99.2353%" y="351.50"></text></g><g><title>jdk.internal.ref.CleanerFactory.&lt;clinit&gt; (8,218,335 samples, 0.02%)</title><rect x="98.9780%" y="373" width="0.0193%" height="15" fill="rgb(222,22,37)" fg:x="42087182745" fg:w="8218335"/><text x="99.2280%" y="383.50"></text></g><g><title>java.util.zip.ZipFile$CleanableResource.&lt;init&gt; (590,776,096 samples, 1.39%)</title><rect x="97.6080%" y="389" width="1.3894%" height="15" fill="rgb(237,53,32)" fg:x="41504625651" fg:w="590776096"/><text x="97.8580%" y="399.50"></text></g><g><title>java.nio.DirectByteBuffer.&lt;init&gt; (4,695,042 samples, 0.01%)</title><rect x="99.0357%" y="309" width="0.0110%" height="15" fill="rgb(233,25,53)" fg:x="42111693535" fg:w="4695042"/><text x="99.2857%" y="319.50"></text></g><g><title>jdk.internal.perf.PerfCounter.getZipFileOpenTime (20,236,872 samples, 0.05%)</title><rect x="98.9992%" y="389" width="0.0476%" height="15" fill="rgb(210,40,34)" fg:x="42096166830" fg:w="20236872"/><text x="99.2492%" y="399.50"></text></g><g><title>jdk.internal.perf.PerfCounter$CoreCounters.&lt;clinit&gt; (17,695,789 samples, 0.04%)</title><rect x="99.0051%" y="373" width="0.0416%" height="15" fill="rgb(241,220,44)" fg:x="42098707913" fg:w="17695789"/><text x="99.2551%" y="383.50"></text></g><g><title>jdk.internal.perf.PerfCounter.newPerfCounter (15,162,456 samples, 0.04%)</title><rect x="99.0111%" y="357" width="0.0357%" height="15" fill="rgb(235,28,35)" fg:x="42101241246" fg:w="15162456"/><text x="99.2611%" y="367.50"></text></g><g><title>jdk.internal.perf.PerfCounter.&lt;init&gt; (12,665,871 samples, 0.03%)</title><rect x="99.0170%" y="341" width="0.0298%" height="15" fill="rgb(210,56,17)" fg:x="42103737831" fg:w="12665871"/><text x="99.2670%" y="351.50"></text></g><g><title>jdk.internal.perf.Perf.createLong (6,647,166 samples, 0.02%)</title><rect x="99.0311%" y="325" width="0.0156%" height="15" fill="rgb(224,130,29)" fg:x="42109756536" fg:w="6647166"/><text x="99.2811%" y="335.50"></text></g><g><title>java.util.jar.JarFile.&lt;init&gt; (855,329,173 samples, 2.01%)</title><rect x="97.0366%" y="469" width="2.0115%" height="15" fill="rgb(235,212,8)" fg:x="41261671613" fg:w="855329173"/><text x="97.2866%" y="479.50">j..</text></g><g><title>java.util.jar.JarFile.&lt;init&gt; (806,424,638 samples, 1.90%)</title><rect x="97.1517%" y="453" width="1.8965%" height="15" fill="rgb(223,33,50)" fg:x="41310576148" fg:w="806424638"/><text x="97.4017%" y="463.50">j..</text></g><g><title>java.util.jar.JarFile.&lt;init&gt; (758,242,429 samples, 1.78%)</title><rect x="97.2650%" y="437" width="1.7832%" height="15" fill="rgb(219,149,13)" fg:x="41358758357" fg:w="758242429"/><text x="97.5150%" y="447.50">j..</text></g><g><title>java.util.zip.ZipFile.&lt;init&gt; (710,025,383 samples, 1.67%)</title><rect x="97.3784%" y="421" width="1.6698%" height="15" fill="rgb(250,156,29)" fg:x="41406975403" fg:w="710025383"/><text x="97.6284%" y="431.50"></text></g><g><title>java.util.zip.ZipFile.&lt;init&gt; (661,910,591 samples, 1.56%)</title><rect x="97.4915%" y="405" width="1.5566%" height="15" fill="rgb(216,193,19)" fg:x="41455090195" fg:w="661910591"/><text x="97.7415%" y="415.50"></text></g><g><title>java.util.zip.Inflater.end (9,745,210 samples, 0.02%)</title><rect x="99.0626%" y="389" width="0.0229%" height="15" fill="rgb(216,135,14)" fg:x="42123160490" fg:w="9745210"/><text x="99.3126%" y="399.50"></text></g><g><title>java.util.zip.Inflater$InflaterZStreamRef.clean (8,719,293 samples, 0.02%)</title><rect x="99.0651%" y="373" width="0.0205%" height="15" fill="rgb(241,47,5)" fg:x="42124186407" fg:w="8719293"/><text x="99.3151%" y="383.50"></text></g><g><title>jdk.internal.ref.PhantomCleanable.clean (7,699,626 samples, 0.02%)</title><rect x="99.0675%" y="357" width="0.0181%" height="15" fill="rgb(233,42,35)" fg:x="42125206074" fg:w="7699626"/><text x="99.3175%" y="367.50"></text></g><g><title>jdk.internal.ref.CleanerImpl$PhantomCleanableRef.performCleanup (6,663,417 samples, 0.02%)</title><rect x="99.0699%" y="341" width="0.0157%" height="15" fill="rgb(231,13,6)" fg:x="42126242283" fg:w="6663417"/><text x="99.3199%" y="351.50"></text></g><g><title>java.util.zip.Inflater$InflaterZStreamRef.run (5,683,250 samples, 0.01%)</title><rect x="99.0722%" y="325" width="0.0134%" height="15" fill="rgb(207,181,40)" fg:x="42127222450" fg:w="5683250"/><text x="99.3222%" y="335.50"></text></g><g><title>java.util.zip.Inflater.end (4,710,209 samples, 0.01%)</title><rect x="99.0745%" y="309" width="0.0111%" height="15" fill="rgb(254,173,49)" fg:x="42128195491" fg:w="4710209"/><text x="99.3245%" y="319.50"></text></g><g><title>java.util.zip.ZipFile.close (15,456,500 samples, 0.04%)</title><rect x="99.0492%" y="469" width="0.0363%" height="15" fill="rgb(221,1,38)" fg:x="42117449659" fg:w="15456500"/><text x="99.2992%" y="479.50"></text></g><g><title>java.util.zip.ZipFile$CleanableResource.clean (14,316,209 samples, 0.03%)</title><rect x="99.0519%" y="453" width="0.0337%" height="15" fill="rgb(206,124,46)" fg:x="42118589950" fg:w="14316209"/><text x="99.3019%" y="463.50"></text></g><g><title>jdk.internal.ref.PhantomCleanable.clean (13,179,876 samples, 0.03%)</title><rect x="99.0546%" y="437" width="0.0310%" height="15" fill="rgb(249,21,11)" fg:x="42119726283" fg:w="13179876"/><text x="99.3046%" y="447.50"></text></g><g><title>jdk.internal.ref.CleanerImpl$PhantomCleanableRef.performCleanup (12,029,876 samples, 0.03%)</title><rect x="99.0573%" y="421" width="0.0283%" height="15" fill="rgb(222,201,40)" fg:x="42120876283" fg:w="12029876"/><text x="99.3073%" y="431.50"></text></g><g><title>java.util.zip.ZipFile$CleanableResource.run (10,921,876 samples, 0.03%)</title><rect x="99.0599%" y="405" width="0.0257%" height="15" fill="rgb(235,61,29)" fg:x="42121984283" fg:w="10921876"/><text x="99.3099%" y="415.50"></text></g><g><title>java.util.zip.Inflater.inflate (4,837,751 samples, 0.01%)</title><rect x="99.3363%" y="373" width="0.0114%" height="15" fill="rgb(219,207,3)" fg:x="42239543995" fg:w="4837751"/><text x="99.5863%" y="383.50"></text></g><g><title>java.io.InputStream.readNBytes (9,847,078 samples, 0.02%)</title><rect x="99.3297%" y="405" width="0.0232%" height="15" fill="rgb(222,56,46)" fg:x="42236735705" fg:w="9847078"/><text x="99.5797%" y="415.50"></text></g><g><title>java.util.zip.InflaterInputStream.read (8,435,245 samples, 0.02%)</title><rect x="99.3331%" y="389" width="0.0198%" height="15" fill="rgb(239,76,54)" fg:x="42238147538" fg:w="8435245"/><text x="99.5831%" y="399.50"></text></g><g><title>java.util.zip.ZipFile$ZipFileInflaterInputStream.close (11,005,332 samples, 0.03%)</title><rect x="99.3529%" y="405" width="0.0259%" height="15" fill="rgb(231,124,27)" fg:x="42246583116" fg:w="11005332"/><text x="99.6029%" y="415.50"></text></g><g><title>jdk.internal.ref.PhantomCleanable.clean (9,591,290 samples, 0.02%)</title><rect x="99.3562%" y="389" width="0.0226%" height="15" fill="rgb(249,195,6)" fg:x="42247997158" fg:w="9591290"/><text x="99.6062%" y="399.50"></text></g><g><title>jdk.internal.ref.CleanerImpl$PhantomCleanableRef.performCleanup (8,495,373 samples, 0.02%)</title><rect x="99.3588%" y="373" width="0.0200%" height="15" fill="rgb(237,174,47)" fg:x="42249093075" fg:w="8495373"/><text x="99.6088%" y="383.50"></text></g><g><title>java.util.zip.ZipFile$InflaterCleanupAction.run (7,489,207 samples, 0.02%)</title><rect x="99.3612%" y="357" width="0.0176%" height="15" fill="rgb(206,201,31)" fg:x="42250099241" fg:w="7489207"/><text x="99.6112%" y="367.50"></text></g><g><title>java.util.zip.ZipFile$CleanableResource.releaseInflater (6,490,040 samples, 0.02%)</title><rect x="99.3635%" y="341" width="0.0153%" height="15" fill="rgb(231,57,52)" fg:x="42251098408" fg:w="6490040"/><text x="99.6135%" y="351.50"></text></g><g><title>java.util.zip.Inflater.reset (5,471,666 samples, 0.01%)</title><rect x="99.3659%" y="325" width="0.0129%" height="15" fill="rgb(248,177,22)" fg:x="42252116782" fg:w="5471666"/><text x="99.6159%" y="335.50"></text></g><g><title>java.util.zip.Inflater.reset (4,540,540 samples, 0.01%)</title><rect x="99.3681%" y="309" width="0.0107%" height="15" fill="rgb(215,211,37)" fg:x="42253047908" fg:w="4540540"/><text x="99.6181%" y="319.50"></text></g><g><title>java.util.zip.Inflater.initIDs (4,274,878 samples, 0.01%)</title><rect x="99.4642%" y="341" width="0.0101%" height="15" fill="rgb(241,128,51)" fg:x="42293894740" fg:w="4274878"/><text x="99.7142%" y="351.50"></text></g><g><title>java.io.File.&lt;init&gt; (5,772,171 samples, 0.01%)</title><rect x="99.5556%" y="261" width="0.0136%" height="15" fill="rgb(227,165,31)" fg:x="42332766243" fg:w="5772171"/><text x="99.8056%" y="271.50"></text></g><g><title>java.lang.String.hashCode (6,410,968 samples, 0.02%)</title><rect x="99.6239%" y="197" width="0.0151%" height="15" fill="rgb(228,167,24)" fg:x="42361802999" fg:w="6410968"/><text x="99.8739%" y="207.50"></text></g><g><title>java.lang.StringLatin1.hashCode (5,096,634 samples, 0.01%)</title><rect x="99.6270%" y="181" width="0.0120%" height="15" fill="rgb(228,143,12)" fg:x="42363117333" fg:w="5096634"/><text x="99.8770%" y="191.50"></text></g><g><title>java.util.concurrent.ConcurrentHashMap.compute (8,913,260 samples, 0.02%)</title><rect x="99.6199%" y="213" width="0.0210%" height="15" fill="rgb(249,149,8)" fg:x="42360112249" fg:w="8913260"/><text x="99.8699%" y="223.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.acquireNativeLibraryLock (10,914,010 samples, 0.03%)</title><rect x="99.6157%" y="229" width="0.0257%" height="15" fill="rgb(243,35,44)" fg:x="42358308374" fg:w="10914010"/><text x="99.8657%" y="239.50"></text></g><g><title>java.util.zip.Inflater.&lt;clinit&gt; (84,541,059 samples, 0.20%)</title><rect x="99.4457%" y="357" width="0.1988%" height="15" fill="rgb(246,89,9)" fg:x="42286054740" fg:w="84541059"/><text x="99.6957%" y="367.50"></text></g><g><title>java.util.zip.ZipUtils.loadLibrary (72,426,181 samples, 0.17%)</title><rect x="99.4742%" y="341" width="0.1703%" height="15" fill="rgb(233,213,13)" fg:x="42298169618" fg:w="72426181"/><text x="99.7242%" y="351.50"></text></g><g><title>jdk.internal.loader.BootLoader.loadLibrary (65,485,598 samples, 0.15%)</title><rect x="99.4905%" y="325" width="0.1540%" height="15" fill="rgb(233,141,41)" fg:x="42305110201" fg:w="65485598"/><text x="99.7405%" y="335.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (58,552,974 samples, 0.14%)</title><rect x="99.5068%" y="309" width="0.1377%" height="15" fill="rgb(239,167,4)" fg:x="42312042825" fg:w="58552974"/><text x="99.7568%" y="319.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (51,636,682 samples, 0.12%)</title><rect x="99.5231%" y="293" width="0.1214%" height="15" fill="rgb(209,217,16)" fg:x="42318959117" fg:w="51636682"/><text x="99.7731%" y="303.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.findFromPaths (44,728,640 samples, 0.11%)</title><rect x="99.5394%" y="277" width="0.1052%" height="15" fill="rgb(219,88,35)" fg:x="42325867159" fg:w="44728640"/><text x="99.7894%" y="287.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (32,055,968 samples, 0.08%)</title><rect x="99.5692%" y="261" width="0.0754%" height="15" fill="rgb(220,193,23)" fg:x="42338539831" fg:w="32055968"/><text x="99.8192%" y="271.50"></text></g><g><title>jdk.internal.loader.NativeLibraries.loadLibrary (25,179,762 samples, 0.06%)</title><rect x="99.5853%" y="245" width="0.0592%" height="15" fill="rgb(230,90,52)" fg:x="42345416037" fg:w="25179762"/><text x="99.8353%" y="255.50"></text></g><g><title>java.util.zip.ZipFile$CleanableResource.getInflater (99,516,595 samples, 0.23%)</title><rect x="99.4246%" y="373" width="0.2340%" height="15" fill="rgb(252,106,19)" fg:x="42277066282" fg:w="99516595"/><text x="99.6746%" y="383.50"></text></g><g><title>java.util.zip.Inflater.&lt;init&gt; (5,987,078 samples, 0.01%)</title><rect x="99.6445%" y="357" width="0.0141%" height="15" fill="rgb(206,74,20)" fg:x="42370595799" fg:w="5987078"/><text x="99.8945%" y="367.50"></text></g><g><title>java.util.zip.ZipFile$ZipFileInflaterInputStream.&lt;init&gt; (109,453,429 samples, 0.26%)</title><rect x="99.4030%" y="389" width="0.2574%" height="15" fill="rgb(230,138,44)" fg:x="42267874282" fg:w="109453429"/><text x="99.6530%" y="399.50"></text></g><g><title>java.util.zip.ZipFile.getInputStream (122,776,179 samples, 0.29%)</title><rect x="99.3788%" y="405" width="0.2887%" height="15" fill="rgb(235,182,43)" fg:x="42257588448" fg:w="122776179"/><text x="99.6288%" y="415.50"></text></g><g><title>java.util.HashMap.hash (13,683,717 samples, 0.03%)</title><rect x="99.7345%" y="341" width="0.0322%" height="15" fill="rgb(242,16,51)" fg:x="42408851164" fg:w="13683717"/><text x="99.9845%" y="351.50"></text></g><g><title>sun.util.locale.BaseLocale.hashCode (9,115,175 samples, 0.02%)</title><rect x="99.7453%" y="325" width="0.0214%" height="15" fill="rgb(248,9,4)" fg:x="42413419706" fg:w="9115175"/><text x="99.9953%" y="335.50"></text></g><g><title>java.util.HashMap.put (20,186,553 samples, 0.05%)</title><rect x="99.7218%" y="357" width="0.0475%" height="15" fill="rgb(210,31,22)" fg:x="42403440207" fg:w="20186553"/><text x="99.9718%" y="367.50"></text></g><g><title>java.util.Locale.createConstant (26,296,386 samples, 0.06%)</title><rect x="99.7080%" y="373" width="0.0618%" height="15" fill="rgb(239,54,39)" fg:x="42397578498" fg:w="26296386"/><text x="99.9580%" y="383.50"></text></g><g><title>java.util.Locale.&lt;clinit&gt; (37,521,544 samples, 0.09%)</title><rect x="99.6911%" y="389" width="0.0882%" height="15" fill="rgb(230,99,41)" fg:x="42390391542" fg:w="37521544"/><text x="99.9411%" y="399.50"></text></g><g><title>java.util.jar.JarFile.getBytes (213,166,045 samples, 0.50%)</title><rect x="99.2808%" y="421" width="0.5013%" height="15" fill="rgb(253,106,12)" fg:x="42215934955" fg:w="213166045"/><text x="99.5308%" y="431.50"></text></g><g><title>sun.security.util.SignatureFileVerifier.&lt;clinit&gt; (48,736,373 samples, 0.11%)</title><rect x="99.6675%" y="405" width="0.1146%" height="15" fill="rgb(213,46,41)" fg:x="42380364627" fg:w="48736373"/><text x="99.9175%" y="415.50"></text></g><g><title>java.util.zip.ZipFile$Source.getEntryPos (6,446,118 samples, 0.02%)</title><rect x="99.7973%" y="389" width="0.0152%" height="15" fill="rgb(215,133,35)" fg:x="42435544416" fg:w="6446118"/><text x="100.0473%" y="399.50"></text></g><g><title>java.util.jar.JarFile.getManEntry (18,475,791 samples, 0.04%)</title><rect x="99.7821%" y="421" width="0.0435%" height="15" fill="rgb(213,28,5)" fg:x="42429101000" fg:w="18475791"/><text x="100.0321%" y="431.50"></text></g><g><title>java.util.zip.ZipFile.getEntry (14,437,250 samples, 0.03%)</title><rect x="99.7916%" y="405" width="0.0340%" height="15" fill="rgb(215,77,49)" fg:x="42433139541" fg:w="14437250"/><text x="100.0416%" y="415.50"></text></g><g><title>java.util.zip.ZipFile.getZipEntry (5,585,965 samples, 0.01%)</title><rect x="99.8125%" y="389" width="0.0131%" height="15" fill="rgb(248,100,22)" fg:x="42441990826" fg:w="5585965"/><text x="100.0625%" y="399.50"></text></g><g><title>java.util.jar.Attributes.putValue (8,607,911 samples, 0.02%)</title><rect x="99.8477%" y="373" width="0.0202%" height="15" fill="rgb(208,67,9)" fg:x="42456958667" fg:w="8607911"/><text x="100.0977%" y="383.50"></text></g><g><title>java.util.jar.Attributes.read (11,902,868 samples, 0.03%)</title><rect x="99.8405%" y="389" width="0.0280%" height="15" fill="rgb(219,133,21)" fg:x="42453908752" fg:w="11902868"/><text x="100.0905%" y="399.50"></text></g><g><title>java.util.jar.Manifest.&lt;init&gt; (17,842,325 samples, 0.04%)</title><rect x="99.8269%" y="421" width="0.0420%" height="15" fill="rgb(246,46,29)" fg:x="42448148377" fg:w="17842325"/><text x="100.0769%" y="431.50"></text></g><g><title>java.util.jar.Manifest.read (14,454,950 samples, 0.03%)</title><rect x="99.8349%" y="405" width="0.0340%" height="15" fill="rgb(246,185,52)" fg:x="42451535752" fg:w="14454950"/><text x="100.0849%" y="415.50"></text></g><g><title>java.util.jar.JarFile.getManifest (302,935,332 samples, 0.71%)</title><rect x="99.1565%" y="453" width="0.7124%" height="15" fill="rgb(252,136,11)" fg:x="42163074744" fg:w="302935332"/><text x="99.4065%" y="463.50"></text></g><g><title>java.util.jar.JarFile.getManifestFromReference (276,535,791 samples, 0.65%)</title><rect x="99.2186%" y="437" width="0.6503%" height="15" fill="rgb(219,138,53)" fg:x="42189474285" fg:w="276535791"/><text x="99.4686%" y="447.50"></text></g><g><title>sun.launcher.LauncherHelper.loadMainClass (2,264,528,126 samples, 5.33%)</title><rect x="94.5434%" y="485" width="5.3256%" height="15" fill="rgb(211,51,23)" fg:x="40201482450" fg:w="2264528126"/><text x="94.7934%" y="495.50">sun.lau..</text></g><g><title>sun.launcher.LauncherHelper.getMainClassFromJar (333,104,417 samples, 0.78%)</title><rect x="99.0856%" y="469" width="0.7834%" height="15" fill="rgb(247,221,28)" fg:x="42132906159" fg:w="333104417"/><text x="99.3356%" y="479.50"></text></g><g><title>java.lang.ClassLoader.getClassLoadingLock (8,213,867 samples, 0.02%)</title><rect x="99.9600%" y="325" width="0.0193%" height="15" fill="rgb(251,222,45)" fg:x="42504730289" fg:w="8213867"/><text x="100.2100%" y="335.50"></text></g><g><title>java.util.concurrent.ConcurrentHashMap.putIfAbsent (6,890,826 samples, 0.02%)</title><rect x="99.9631%" y="309" width="0.0162%" height="15" fill="rgb(217,162,53)" fg:x="42506053330" fg:w="6890826"/><text x="100.2131%" y="319.50"></text></g><g><title>java.util.concurrent.ConcurrentHashMap.putVal (5,623,993 samples, 0.01%)</title><rect x="99.9661%" y="293" width="0.0132%" height="15" fill="rgb(229,93,14)" fg:x="42507320163" fg:w="5623993"/><text x="100.2161%" y="303.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.findLoadedModule (4,722,505 samples, 0.01%)</title><rect x="99.9793%" y="325" width="0.0111%" height="15" fill="rgb(209,67,49)" fg:x="42512944865" fg:w="4722505"/><text x="100.2293%" y="335.50"></text></g><g><title>java.lang.Class.getDeclaredMethods0 (30,815,788 samples, 0.07%)</title><rect x="99.9245%" y="389" width="0.0725%" height="15" fill="rgb(213,87,29)" fg:x="42489619745" fg:w="30815788"/><text x="100.1745%" y="399.50"></text></g><g><title>java.lang.ClassLoader.loadClass (27,233,371 samples, 0.06%)</title><rect x="99.9329%" y="373" width="0.0640%" height="15" fill="rgb(205,151,52)" fg:x="42493202162" fg:w="27233371"/><text x="100.1829%" y="383.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.loadClass (23,709,788 samples, 0.06%)</title><rect x="99.9412%" y="357" width="0.0558%" height="15" fill="rgb(253,215,39)" fg:x="42496725745" fg:w="23709788"/><text x="100.1912%" y="367.50"></text></g><g><title>jdk.internal.loader.BuiltinClassLoader.loadClassOrNull (20,204,539 samples, 0.05%)</title><rect x="99.9494%" y="341" width="0.0475%" height="15" fill="rgb(221,220,41)" fg:x="42500230994" fg:w="20204539"/><text x="100.1994%" y="351.50"></text></g><g><title>java.lang.Class.privateGetDeclaredMethods (35,115,496 samples, 0.08%)</title><rect x="99.9156%" y="405" width="0.0826%" height="15" fill="rgb(218,133,21)" fg:x="42485840661" fg:w="35115496"/><text x="100.1656%" y="415.50"></text></g><g><title>java.lang.Class.getMethodsRecursive (39,184,914 samples, 0.09%)</title><rect x="99.9064%" y="421" width="0.0922%" height="15" fill="rgb(221,193,43)" fg:x="42481960577" fg:w="39184914"/><text x="100.1564%" y="431.50"></text></g><g><title>java.lang.System$1.findMethod (47,267,124 samples, 0.11%)</title><rect x="99.8878%" y="453" width="0.1112%" height="15" fill="rgb(240,128,52)" fg:x="42474047910" fg:w="47267124"/><text x="100.1378%" y="463.50"></text></g><g><title>java.lang.Class.findMethod (43,308,624 samples, 0.10%)</title><rect x="99.8972%" y="437" width="0.1019%" height="15" fill="rgb(253,114,12)" fg:x="42478006410" fg:w="43308624"/><text x="100.1472%" y="447.50"></text></g><g><title>jdk.internal.misc.MethodFinder.findMainMethod (51,280,375 samples, 0.12%)</title><rect x="99.8784%" y="469" width="0.1206%" height="15" fill="rgb(215,223,47)" fg:x="42470047618" fg:w="51280375"/><text x="100.1284%" y="479.50"></text></g><g><title>sun.launcher.LauncherHelper.checkAndLoadMain (2,457,040,377 samples, 5.78%)</title><rect x="94.2207%" y="501" width="5.7783%" height="15" fill="rgb(248,225,23)" fg:x="40064287866" fg:w="2457040377"/><text x="94.4707%" y="511.50">sun.lau..</text></g><g><title>sun.launcher.LauncherHelper.validateMainMethod (55,317,667 samples, 0.13%)</title><rect x="99.8689%" y="485" width="0.1301%" height="15" fill="rgb(250,108,0)" fg:x="42466010576" fg:w="55317667"/><text x="100.1189%" y="495.50"></text></g><g><title>all (42,521,739,952 samples, 100%)</title><rect x="0.0000%" y="517" width="100.0000%" height="15" fill="rgb(228,208,7)" fg:x="0" fg:w="42521739952"/><text x="0.2500%" y="527.50"></text></g></svg></svg>
+>>>>>>> 39129bb (updates)

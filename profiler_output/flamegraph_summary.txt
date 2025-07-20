@@ -1,5 +1,4 @@
 Flamegraph Summary
-==================
 Total samples: 2387358
 Total time: 23.94s
 
@@ -14,3 +13,4 @@ org.antlr.v4.runtime.misc.Array2DHashSet.getOrAddImpl: 1.76s
 org.antlr.v4.runtime.atn.ATNConfig.hashCode: 1.44s
 org.antlr.v4.runtime.atn.SingletonPredictionContext.equals: 838.9ms
 org.antlr.v4.runtime.atn.PredictionMode$AltAndContextConfigEqualityComparator.hashCode: 638.6ms
+

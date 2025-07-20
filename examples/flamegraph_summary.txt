@@ -1,5 +1,4 @@
 Flamegraph Summary
-==================
 Total samples: 13169
 Total time: 42.59s
 

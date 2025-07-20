@@ -68,7 +68,34 @@ fn main() {
             Arg::new("sampling-interval")
                 .long("sampling-interval")
                 .value_name("MS")
-                .help("Sampling interval in milliseconds (for future sampling support)"),
+                .help("Sampling interval in milliseconds")
+                .default_value("10"),
+        )
+        .arg(
+            Arg::new("profile-mode")
+                .long("profile-mode")
+                .value_name("MODE")
+                .help("Profiling mode: cpu, memory, allocation, all")
+                .default_value("all")
+                .value_parser(["cpu", "memory", "allocation", "all"]),
+        )
+        .arg(
+            Arg::new("no-gc-events")
+                .long("no-gc-events")
+                .help("Disable GC event tracking")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("no-thread-events")
+                .long("no-thread-events")
+                .help("Disable thread event tracking")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("no-lock-contention")
+                .long("no-lock-contention")
+                .help("Disable lock contention profiling")
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("java-executable")
@@ -178,8 +205,12 @@ fn main() {
         println!("  Stack size: {}", config.stack_size);
         println!("  Java executable: {}", config.java_executable);
         println!(
-            "  Features: flamegraph={}, allocation={}, call-graph={}",
-            config.flamegraph, config.allocation_tracking, config.call_graph
+            "  Features: flamegraph={}, allocation={}, call-graph={}, lock-contention={}, mode={}",
+            config.flamegraph, config.allocation_tracking, config.call_graph, config.lock_contention, config.profile_mode
+        );
+        println!(
+            "  Sampling interval: {}ms, GC events: {}, Thread events: {}",
+            config.sampling_interval.unwrap_or(10), config.gc_events, config.thread_events
         );
     }
 
