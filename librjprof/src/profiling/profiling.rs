@@ -11,6 +11,7 @@ use std::io::Write;
 use std::sync::Mutex;
 
 use crate::bindings::gen_bindings::*;
+use crate::logger;
 use crate::{ProfilerConfig, SortOption, ExportFormat, ProfileMode};
 
 thread_local! {
@@ -557,7 +558,7 @@ fn export_to_json(stats: &[EnhancedMethodStats], output_path: &str) -> Result<()
     
     let json_string = format!("{:#?}", json_data); // Simple debug format for now
     std::fs::write(output_path, json_string)?;
-    println!("📊 Results exported to JSON: {}", output_path);
+    logger::get_logger().result(&format!("Results exported to JSON: {}", output_path));
     Ok(())
 }
 
@@ -580,7 +581,7 @@ fn export_to_csv(stats: &[EnhancedMethodStats], output_path: &str) -> Result<(),
     }
     
     std::fs::write(output_path, csv_content)?;
-    println!("📊 Results exported to CSV: {}", output_path);
+    logger::get_logger().result(&format!("Results exported to CSV: {}", output_path));
     Ok(())
 }
 
@@ -625,7 +626,7 @@ fn write_flamegraph_data(jvmti_env: *mut jvmtiEnv) -> Result<(), Box<dyn std::er
     let mut file = File::create("flamegraph.folded")?;
     file.write_all(folded_data.as_bytes())?;
 
-    println!("🔥 Flamegraph data written to 'flamegraph.folded'");
+    logger::get_logger().result("Flamegraph data written to 'flamegraph.folded'");
     println!("   Generate SVG with: flamegraph.pl flamegraph.folded > flamegraph.svg");
     println!("   Or use: inferno-flamegraph flamegraph.folded > flamegraph.svg");
 
@@ -663,7 +664,7 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
         config_guard.as_ref().cloned().unwrap_or_default()
     };
 
-    println!("\n🔍 === ENHANCED PERFORMANCE ANALYSIS ===");
+    logger::get_logger().section("ENHANCED PERFORMANCE ANALYSIS");
     
     // Display filtering info
     println!("Profile mode: {:?}", config.profile_mode);
@@ -760,11 +761,11 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
     let display_count = std::cmp::min(enhanced_stats.len(), 20);
 
     // Display method performance statistics
-    println!(
-        "\n⏱️  === Top {} methods (sorted by {:?}) ===",
+    logger::get_logger().subsection(&format!(
+        "Top {} methods (sorted by {:?})",
         display_count,
         config.sort_by
-    );
+    ));
     
     println!(
         "{:<45} {:>8} {:>10} {:>10} {:>10} {:>8}",
@@ -827,7 +828,7 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
     }
 
     // Summary statistics
-    println!("\n📊 === Summary Statistics ===");
+    logger::get_logger().subsection("Summary Statistics");
     println!("Total methods analyzed: {}", enhanced_stats.len());
     println!("Total self-time: {}", format_time_conditional(total_self_time, config.human_readable));
     
@@ -847,10 +848,10 @@ fn display_call_graph_analysis(jvmti_env: *mut jvmtiEnv, config: &ProfilerConfig
 
     let top_calls = std::cmp::min(call_relations.len(), 15);
     if !call_relations.is_empty() {
-        println!(
-            "\n📞 === Top {} call relationships by total time ===",
+        logger::get_logger().subsection(&format!(
+            "Top {} call relationships by total time",
             top_calls
-        );
+        ));
         
         println!(
             "{:<35} {:<35} {:>8} {:>10}",
@@ -899,10 +900,10 @@ fn display_allocation_analysis(jvmti_env: *mut jvmtiEnv, config: &ProfilerConfig
     let top_alloc = std::cmp::min(alloc_stats.len(), 10);
 
     if !alloc_stats.is_empty() {
-        println!(
-            "\n🏭 === Top {} methods by memory allocation ===",
+        logger::get_logger().subsection(&format!(
+            "Top {} methods by memory allocation",
             top_alloc
-        );
+        ));
         
         println!(
             "{:<45} {:>8} {:>12}",
@@ -937,10 +938,10 @@ fn display_allocation_analysis(jvmti_env: *mut jvmtiEnv, config: &ProfilerConfig
     let top_classes = std::cmp::min(class_stats.len(), 10);
 
     if !class_stats.is_empty() {
-        println!(
-            "\n📦 === Top {} classes by memory allocation ===",
+        logger::get_logger().subsection(&format!(
+            "Top {} classes by memory allocation",
             top_classes
-        );
+        ));
         
         println!(
             "{:<40} {:>8} {:>12}",
@@ -973,9 +974,9 @@ extern "C" fn vm_init_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv, 
         let mut threads: *mut jthread = ptr::null_mut();
         let err = (**jvmti_env).GetAllThreads.unwrap()(jvmti_env, &mut thread_count, &mut threads);
 
-        println!("✅ [VM_INIT] JVM thread count: {}", thread_count);
-        println!("📊 Call graph analysis & allocation tracking enabled");
-        println!("🔥 Flamegraph generation enabled");
+        logger::get_logger().status(&format!("JVM initialized with {} threads", thread_count));
+        logger::get_logger().status("Call graph analysis & allocation tracking enabled");
+        logger::get_logger().status("Flamegraph generation enabled");
     }
 }
 

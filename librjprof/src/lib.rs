@@ -24,6 +24,7 @@
 
 pub mod bindings;
 pub mod profiling;
+pub mod logger;
 
 // Re-export key types for easier access
 pub use profiling::profiling::{set_profiler_config};

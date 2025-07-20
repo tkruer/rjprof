@@ -2,6 +2,9 @@ use clap::{Arg, Command};
 use rjprof::{ProfilerConfig, SortOption, ExportFormat, ProfileMode, get_spring_excludes, configure_profiler};
 
 mod cli;
+mod logger;
+
+use logger::{Logger, LogLevel, init_logger};
 
 use cli::cli_tooling::{parse_config, run_profiler, generate_flamegraph_svg};
 
@@ -163,12 +166,46 @@ fn main() {
                 .help("Enable Spring-optimized filtering (excludes common Spring noise)")
                 .action(clap::ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("quiet")
+                .short('q')
+                .long("quiet")
+                .help("Suppress most output, only show errors")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("log-level")
+                .long("log-level")
+                .value_name("LEVEL")
+                .help("Set log level: error, warn, info, debug, trace")
+                .default_value("info"),
+        )
         .get_matches();
+
+    // Initialize logger based on CLI options
+    let logger = if matches.get_flag("quiet") {
+        Logger::quiet()
+    } else if matches.get_flag("verbose") {
+        Logger::verbose()
+    } else {
+        let log_level = match matches.get_one::<String>("log-level").unwrap().as_str() {
+            "error" => LogLevel::Error,
+            "warn" => LogLevel::Warn,
+            "info" => LogLevel::Info,
+            "debug" => LogLevel::Debug,
+            "trace" => LogLevel::Trace,
+            _ => LogLevel::Info,
+        };
+        Logger::new(log_level, !matches.get_flag("no-color"), false)
+    };
+    
+    init_logger(logger);
+    let log = logger::get_logger();
 
     let config = match parse_config(&matches) {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("Error: {}", e);
+            log.error(&format!("Configuration error: {}", e));
             std::process::exit(1);
         }
     };
@@ -177,32 +214,33 @@ fn main() {
     configure_profiler(config.clone());
 
     if matches.get_flag("verbose") {
-        println!("🔧 Configuration:");
-        println!("  JAR file: {}", config.jar_file);
-        println!("  Agent path: {}", config.agent_path);
-        println!("  Output directory: {}", config.output_dir);
-        println!("  Stack size: {}", config.stack_size);
-        println!("  Java executable: {}", config.java_executable);
-        println!(
-            "  Features: flamegraph={}, allocation={}, call-graph={}",
+        log.section("Configuration");
+        log.config(&format!("JAR file: {}", config.jar_file));
+        log.config(&format!("Agent path: {}", config.agent_path));
+        log.config(&format!("Output directory: {}", config.output_dir));
+        log.config(&format!("Stack size: {}", config.stack_size));
+        log.config(&format!("Java executable: {}", config.java_executable));
+        log.config(&format!(
+            "Features: flamegraph={}, allocation={}, call-graph={}",
             config.flamegraph, config.allocation_tracking, config.call_graph
-        );
-        println!("  Profile mode: {:?}", config.profile_mode);
+        ));
+        log.config(&format!("Profile mode: {:?}", config.profile_mode));
     }
 
+    log.status("Starting profiler");
     if let Err(e) = run_profiler(&config, matches.get_flag("verbose")) {
-        eprintln!("Error running profiler: {}", e);
+        log.error(&format!("Profiler execution failed: {}", e));
         std::process::exit(1);
     }
 
     if matches.get_flag("generate-flamegraph") {
+        log.status("Generating flamegraph SVG");
         if let Err(e) = generate_flamegraph_svg(&config) {
-            eprintln!("Warning: Failed to generate flamegraph SVG: {}", e);
+            log.warn(&format!("Failed to generate flamegraph SVG: {}", e));
+        } else {
+            log.result("Flamegraph SVG generated successfully");
         }
     }
 
-    println!(
-        "✅ Profiling complete! Results saved to: {}",
-        config.output_dir
-    );
+    log.success(&format!("Profiling complete! Results saved to: {}", config.output_dir));
 }

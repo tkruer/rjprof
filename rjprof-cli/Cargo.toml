@@ -13,3 +13,4 @@ path = "src/main.rs"
 [dependencies]
 librjprof = { path = "../librjprof" }
 clap = { workspace = true }
+atty = "0.2"

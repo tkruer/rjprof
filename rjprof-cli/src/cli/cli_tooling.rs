@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command as ProcessCommand, Stdio};
 use rjprof::{ProfilerConfig, SortOption, ExportFormat, ProfileMode, get_spring_excludes, configure_profiler};
+use crate::logger;
 
 pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
     let mut config = ProfilerConfig::default();
@@ -196,7 +197,7 @@ pub fn run_profiler(config: &ProfilerConfig, verbose: bool) -> Result<(), String
     java_cmd.arg(Path::new(&original_dir).join(&config.jar_file));
 
     if verbose {
-        println!("🚀 Running command: {:?}", java_cmd);
+        logger::get_logger().debug(&format!("Executing command: {:?}", java_cmd));
     }
 
     // Execute the command
@@ -253,7 +254,7 @@ pub fn generate_flamegraph_svg(config: &ProfilerConfig) -> Result<(), String> {
                     fs::write(&svg_path, output.stdout)
                         .map_err(|e| format!("Failed to write SVG file: {}", e))?;
 
-                    println!("🔥 Flamegraph SVG generated: {}", svg_path.display());
+                    logger::get_logger().result(&format!("Flamegraph SVG generated: {}", svg_path.display()));
                     return Ok(());
                 } else {
                     eprintln!(
