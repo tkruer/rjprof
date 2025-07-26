@@ -1,8 +1,8 @@
 # rjprof
 
-A high-performance Java profiler, similar to [async-profiler](https://github.com/async-profiler/async-profiler).
+(Rust-Java profiler), similar to [async-profiler](https://github.com/async-profiler/async-profiler).
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Build everything
@@ -18,7 +18,7 @@ make run-spring
 make profile JAR=myapp.jar ARGS="--spring --mode user"
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 This project uses a Cargo workspace with two main components:
 
@@ -26,7 +26,7 @@ This project uses a Cargo workspace with two main components:
 - **`rjprof-cli/`** - Command-line interface and tools
 - **`examples/`** - Sample applications for testing
 
-## 🛠️ Building
+## Building
 
 ### Simple Build (Recommended)
 ```bash
@@ -114,7 +114,7 @@ cargo build --release --workspace
 - **Call graph analysis** - Understand call relationships
 - **Sampling support** - Low-overhead profiling option
 
-## 📋 Examples
+## Examples
 
 ### Profile Spring Boot Application
 ```bash
@@ -151,7 +151,7 @@ make run-spring
   --min-self-time 100us
 ```
 
-## 🔥 Flamegraph Generation
+## Flamegraph Generation
 
 Generate visual flamegraphs for performance analysis:
 
@@ -165,7 +165,7 @@ make flamegraph
 
 Flamegraphs are saved to `profiler_output/flamegraph.svg`.
 
-## 🧪 Development
+## Development
 
 ### Running Tests
 ```bash
@@ -180,7 +180,7 @@ cargo clippy --workspace    # Run linter
 cargo fmt --workspace       # Format code
 ```
 
-## 📈 Performance Tips
+## Performance Tips
 
 1. **Use `--mode user`** for most applications to focus on your code
 2. **Enable `--spring`** for Spring Boot apps to reduce noise
@@ -188,7 +188,7 @@ cargo fmt --workspace       # Format code
 4. **Generate flamegraphs** for visual analysis of performance bottlenecks
 5. **Export to JSON** for integration with other analysis tools
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### Agent Not Found
 ```bash
@@ -213,7 +213,7 @@ make build
 cargo check --workspace
 ```
 
-## 📄 License
+## License
 
 Licensed under either of:
 - Apache License, Version 2.0
