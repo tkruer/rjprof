@@ -16,6 +16,6 @@ name = "rjprof"
 path = "src/main.rs"
 
 [dependencies]
-librjprof = { path = "../librjprof" }
+librjprof = { version = "0.1.0", path = "../librjprof" }
 clap = { workspace = true }
 atty = "0.2"
