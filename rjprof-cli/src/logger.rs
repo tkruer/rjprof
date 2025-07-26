@@ -142,7 +142,7 @@ impl Logger {
         if !self.should_log(LogLevel::Info) {
             return;
         }
-        
+
         let separator = "=".repeat(title.len() + 8);
         self.info(&separator);
         self.info(&format!("    {}", title));
@@ -153,7 +153,7 @@ impl Logger {
         if !self.should_log(LogLevel::Info) {
             return;
         }
-        
+
         let separator = "-".repeat(title.len() + 4);
         self.info(&separator);
         self.info(&format!("  {}", title));

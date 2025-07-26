@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 use crate::bindings::gen_bindings::*;
 use crate::logger;
-use crate::{ProfilerConfig, SortOption, ExportFormat, ProfileMode};
+use crate::{ExportFormat, ProfileMode, ProfilerConfig, SortOption};
 
 thread_local! {
     static ENTRY_TIMES: RefCell<HashMap<jmethodID, u64>> = RefCell::new(HashMap::new());
@@ -111,7 +111,7 @@ pub fn set_profiler_config(config: ProfilerConfig) {
 
 fn should_profile_method(class_name: &str, method_name: &str, config: &ProfilerConfig) -> bool {
     let full_name = format!("{}.{}", class_name, method_name);
-    
+
     match config.profile_mode {
         ProfileMode::All => true,
         ProfileMode::UserCode => should_include_user_code(class_name, config),
@@ -123,15 +123,17 @@ fn should_profile_method(class_name: &str, method_name: &str, config: &ProfilerC
 fn should_include_user_code(class_name: &str, config: &ProfilerConfig) -> bool {
     // If includes are specified, only allow those
     if !config.include_packages.is_empty() {
-        return config.include_packages.iter().any(|pattern| {
-            matches_pattern(class_name, pattern)
-        });
+        return config
+            .include_packages
+            .iter()
+            .any(|pattern| matches_pattern(class_name, pattern));
     }
-    
+
     // Otherwise, exclude common framework packages
-    !config.exclude_packages.iter().any(|pattern| {
-        matches_pattern(class_name, pattern)
-    })
+    !config
+        .exclude_packages
+        .iter()
+        .any(|pattern| matches_pattern(class_name, pattern))
 }
 
 fn matches_pattern(class_name: &str, pattern: &str) -> bool {
@@ -160,12 +162,12 @@ extern "C" fn method_entry_callback(
     unsafe {
         // Quick filtering check - get method info to determine if we should profile
         let (class_name, method_name, _) = get_method_info(jvmti_env, method);
-        
+
         let config = {
             let config_guard = GLOBAL_CONFIG.lock().unwrap();
             config_guard.as_ref().cloned().unwrap_or_default()
         };
-        
+
         if !should_profile_method(&class_name, &method_name, &config) {
             return;
         }
@@ -370,7 +372,7 @@ extern "C" fn vm_object_alloc_callback(
             let config_guard = GLOBAL_CONFIG.lock().unwrap();
             config_guard.as_ref().cloned().unwrap_or_default()
         };
-        
+
         if !should_track_allocation(&class_name, &config) {
             return;
         }
@@ -518,7 +520,7 @@ fn colorize_time_percentage(text: &str, percentage: f64, colorized: bool) -> Str
     if !colorized {
         return text.to_string();
     }
-    
+
     if percentage >= 20.0 {
         format!("\x1b[31m{}\x1b[0m", text) // Red for >20%
     } else if percentage >= 5.0 {
@@ -539,33 +541,51 @@ struct EnhancedMethodStats {
     percentage: f64,
 }
 
-fn export_to_json(stats: &[EnhancedMethodStats], output_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn export_to_json(
+    stats: &[EnhancedMethodStats],
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     use std::collections::HashMap;
-    
+
     let mut json_data = HashMap::new();
-    json_data.insert("profiling_results", stats.iter().map(|s| {
-        let mut method_data = HashMap::new();
-        method_data.insert("class_name", s.class_name.clone());
-        method_data.insert("method_name", s.method_name.clone());
-        method_data.insert("call_count", s.stats.count.to_string());
-        method_data.insert("total_time_ns", s.stats.total_nanos.to_string());
-        method_data.insert("self_time_ns", s.stats.self_nanos.to_string());
-        method_data.insert("avg_total_ns", (s.stats.total_nanos / s.stats.count).to_string());
-        method_data.insert("avg_self_ns", (s.stats.self_nanos / s.stats.count).to_string());
-        method_data.insert("percentage", format!("{:.2}", s.percentage));
-        method_data
-    }).collect::<Vec<_>>());
-    
+    json_data.insert(
+        "profiling_results",
+        stats
+            .iter()
+            .map(|s| {
+                let mut method_data = HashMap::new();
+                method_data.insert("class_name", s.class_name.clone());
+                method_data.insert("method_name", s.method_name.clone());
+                method_data.insert("call_count", s.stats.count.to_string());
+                method_data.insert("total_time_ns", s.stats.total_nanos.to_string());
+                method_data.insert("self_time_ns", s.stats.self_nanos.to_string());
+                method_data.insert(
+                    "avg_total_ns",
+                    (s.stats.total_nanos / s.stats.count).to_string(),
+                );
+                method_data.insert(
+                    "avg_self_ns",
+                    (s.stats.self_nanos / s.stats.count).to_string(),
+                );
+                method_data.insert("percentage", format!("{:.2}", s.percentage));
+                method_data
+            })
+            .collect::<Vec<_>>(),
+    );
+
     let json_string = format!("{:#?}", json_data); // Simple debug format for now
     std::fs::write(output_path, json_string)?;
     logger::get_logger().result(&format!("Results exported to JSON: {}", output_path));
     Ok(())
 }
 
-fn export_to_csv(stats: &[EnhancedMethodStats], output_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn export_to_csv(
+    stats: &[EnhancedMethodStats],
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut csv_content = String::new();
     csv_content.push_str("class_name,method_name,call_count,total_time_ns,self_time_ns,avg_total_ns,avg_self_ns,percentage\n");
-    
+
     for stat in stats {
         csv_content.push_str(&format!(
             "{},{},{},{},{},{},{},{:.2}\n",
@@ -579,7 +599,7 @@ fn export_to_csv(stats: &[EnhancedMethodStats], output_path: &str) -> Result<(),
             stat.percentage
         ));
     }
-    
+
     std::fs::write(output_path, csv_content)?;
     logger::get_logger().result(&format!("Results exported to CSV: {}", output_path));
     Ok(())
@@ -665,7 +685,7 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
     };
 
     logger::get_logger().section("ENHANCED PERFORMANCE ANALYSIS");
-    
+
     // Display filtering info
     println!("Profile mode: {:?}", config.profile_mode);
     if !config.exclude_packages.is_empty() {
@@ -675,7 +695,10 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
         println!("Including only: {}", config.include_packages.join(", "));
     }
     if let Some(min_self) = config.min_self_time_ns {
-        println!("Min self-time filter: {}", format_time_conditional(min_self, config.human_readable));
+        println!(
+            "Min self-time filter: {}",
+            format_time_conditional(min_self, config.human_readable)
+        );
     }
 
     // Generate flamegraph data
@@ -709,7 +732,7 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
             } else {
                 0.0
             };
-            
+
             EnhancedMethodStats {
                 method_id,
                 stats,
@@ -733,13 +756,13 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
 
     // Apply mode-specific filtering
     match config.profile_mode {
-        ProfileMode::All => {}, // No additional filtering
+        ProfileMode::All => {} // No additional filtering
         ProfileMode::UserCode => {
             enhanced_stats.retain(|s| should_include_user_code(&s.class_name, &config));
-        },
+        }
         ProfileMode::Hotspots => {
             enhanced_stats.retain(|s| s.percentage >= 1.0); // Only hotspots >1%
-        },
+        }
         ProfileMode::Allocation => {
             // For allocation mode, we might want to show allocation-heavy methods
             // This could be enhanced to correlate with allocation stats
@@ -748,14 +771,20 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
 
     // Apply sorting
     match config.sort_by {
-        SortOption::TotalTime => enhanced_stats.sort_by_key(|s| std::cmp::Reverse(s.stats.total_nanos)),
-        SortOption::SelfTime => enhanced_stats.sort_by_key(|s| std::cmp::Reverse(s.stats.self_nanos)),
+        SortOption::TotalTime => {
+            enhanced_stats.sort_by_key(|s| std::cmp::Reverse(s.stats.total_nanos))
+        }
+        SortOption::SelfTime => {
+            enhanced_stats.sort_by_key(|s| std::cmp::Reverse(s.stats.self_nanos))
+        }
         SortOption::Calls => enhanced_stats.sort_by_key(|s| std::cmp::Reverse(s.stats.count)),
         SortOption::Name => enhanced_stats.sort_by(|a, b| {
             format!("{}.{}", a.class_name, a.method_name)
                 .cmp(&format!("{}.{}", b.class_name, b.method_name))
         }),
-        SortOption::Percentage => enhanced_stats.sort_by(|a, b| b.percentage.partial_cmp(&a.percentage).unwrap()),
+        SortOption::Percentage => {
+            enhanced_stats.sort_by(|a, b| b.percentage.partial_cmp(&a.percentage).unwrap())
+        }
     }
 
     let display_count = std::cmp::min(enhanced_stats.len(), 20);
@@ -763,10 +792,9 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
     // Display method performance statistics
     logger::get_logger().subsection(&format!(
         "Top {} methods (sorted by {:?})",
-        display_count,
-        config.sort_by
+        display_count, config.sort_by
     ));
-    
+
     println!(
         "{:<45} {:>8} {:>10} {:>10} {:>10} {:>8}",
         "Method", "Calls", "Self Time", "Total Time", "Avg Self", "% Total"
@@ -787,7 +815,8 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
         let avg_self_str = format_time_conditional(avg_self, config.human_readable);
         let percentage_str = format!("{:>6.2}%", stat.percentage);
 
-        let colored_percentage = colorize_time_percentage(&percentage_str, stat.percentage, config.colorized);
+        let colored_percentage =
+            colorize_time_percentage(&percentage_str, stat.percentage, config.colorized);
         let colored_method = if stat.percentage >= 20.0 && config.colorized {
             colorize_time_percentage(&method_display, stat.percentage, config.colorized)
         } else {
@@ -811,7 +840,7 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
             ExportFormat::Json => export_to_json(&enhanced_stats, "profiling_results.json"),
             ExportFormat::Csv => export_to_csv(&enhanced_stats, "profiling_results.csv"),
         };
-        
+
         if let Err(e) = result {
             eprintln!("Export error: {}", e);
         }
@@ -830,8 +859,11 @@ extern "C" fn vm_death_callback(jvmti_env: *mut jvmtiEnv, _jni_env: *mut JNIEnv)
     // Summary statistics
     logger::get_logger().subsection("Summary Statistics");
     println!("Total methods analyzed: {}", enhanced_stats.len());
-    println!("Total self-time: {}", format_time_conditional(total_self_time, config.human_readable));
-    
+    println!(
+        "Total self-time: {}",
+        format_time_conditional(total_self_time, config.human_readable)
+    );
+
     if let Some(top_method) = enhanced_stats.first() {
         println!(
             "Hottest method: {}.{} ({:.2}%)",
@@ -852,13 +884,13 @@ fn display_call_graph_analysis(jvmti_env: *mut jvmtiEnv, config: &ProfilerConfig
             "Top {} call relationships by total time",
             top_calls
         ));
-        
+
         println!(
             "{:<35} {:<35} {:>8} {:>10}",
             "Caller", "Callee", "Calls", "Avg Time"
         );
         println!("{}", "─".repeat(90));
-        
+
         for (edge, rel) in call_relations.iter().take(top_calls) {
             let (caller_class, caller_method, _) = get_method_info(jvmti_env, edge.caller.0);
             let (callee_class, callee_method, _) = get_method_info(jvmti_env, edge.callee.0);
@@ -872,7 +904,7 @@ fn display_call_graph_analysis(jvmti_env: *mut jvmtiEnv, config: &ProfilerConfig
             } else {
                 caller_short
             };
-            
+
             let callee_display = if callee_short.len() > 35 {
                 format!("{}...", &callee_short[..32])
             } else {
@@ -900,17 +932,11 @@ fn display_allocation_analysis(jvmti_env: *mut jvmtiEnv, config: &ProfilerConfig
     let top_alloc = std::cmp::min(alloc_stats.len(), 10);
 
     if !alloc_stats.is_empty() {
-        logger::get_logger().subsection(&format!(
-            "Top {} methods by memory allocation",
-            top_alloc
-        ));
-        
-        println!(
-            "{:<45} {:>8} {:>12}",
-            "Method", "Objects", "Total Bytes"
-        );
+        logger::get_logger().subsection(&format!("Top {} methods by memory allocation", top_alloc));
+
+        println!("{:<45} {:>8} {:>12}", "Method", "Objects", "Total Bytes");
         println!("{}", "─".repeat(70));
-        
+
         for (MethodId(method), st) in alloc_stats.iter().take(top_alloc) {
             let (class_name, method_name, _) = get_method_info(jvmti_env, *method);
             let method_str = format!("{}.{}", class_name, method_name);
@@ -919,7 +945,7 @@ fn display_allocation_analysis(jvmti_env: *mut jvmtiEnv, config: &ProfilerConfig
             } else {
                 method_str
             };
-            
+
             println!(
                 "{:<45} {:>8} {:>12}",
                 method_display,
@@ -938,24 +964,19 @@ fn display_allocation_analysis(jvmti_env: *mut jvmtiEnv, config: &ProfilerConfig
     let top_classes = std::cmp::min(class_stats.len(), 10);
 
     if !class_stats.is_empty() {
-        logger::get_logger().subsection(&format!(
-            "Top {} classes by memory allocation",
-            top_classes
-        ));
-        
-        println!(
-            "{:<40} {:>8} {:>12}",
-            "Class", "Objects", "Total Bytes"
-        );
+        logger::get_logger()
+            .subsection(&format!("Top {} classes by memory allocation", top_classes));
+
+        println!("{:<40} {:>8} {:>12}", "Class", "Objects", "Total Bytes");
         println!("{}", "─".repeat(65));
-        
+
         for st in class_stats.iter().take(top_classes) {
             let class_display = if st.class_name.len() > 40 {
                 format!("{}...", &st.class_name[..37])
             } else {
                 st.class_name.clone()
             };
-            
+
             println!(
                 "{:<40} {:>8} {:>12}",
                 class_display,

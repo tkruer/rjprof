@@ -1,10 +1,12 @@
+use crate::logger;
 use clap::ArgMatches;
+use rjprof::{
+    configure_profiler, get_spring_excludes, ExportFormat, ProfileMode, ProfilerConfig, SortOption,
+};
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::{Command as ProcessCommand, Stdio};
-use rjprof::{ProfilerConfig, SortOption, ExportFormat, ProfileMode, get_spring_excludes, configure_profiler};
-use crate::logger;
 
 pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
     let mut config = ProfilerConfig::default();
@@ -12,8 +14,11 @@ pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
     // Handle PID mode vs JAR mode
     if let Some(pid_str) = matches.get_one::<String>("experimental-pid") {
         // PID mode - attach to existing process
-        config.target_pid = Some(pid_str.parse()
-            .map_err(|_| format!("Invalid PID: {}", pid_str))?);
+        config.target_pid = Some(
+            pid_str
+                .parse()
+                .map_err(|_| format!("Invalid PID: {}", pid_str))?,
+        );
         config.jar_file = String::new(); // Not needed in PID mode
     } else {
         // JAR mode - launch new process
@@ -83,7 +88,12 @@ pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
             "calls" => SortOption::Calls,
             "name" => SortOption::Name,
             "percentage" | "pct" => SortOption::Percentage,
-            _ => return Err(format!("Invalid sort option: {}. Use: total, self, calls, name, percentage", sort)),
+            _ => {
+                return Err(format!(
+                    "Invalid sort option: {}. Use: total, self, calls, name, percentage",
+                    sort
+                ))
+            }
         };
     }
 
@@ -115,7 +125,7 @@ pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
     } else if let Some(excludes) = matches.get_many::<String>("exclude") {
         config.exclude_packages = excludes.cloned().collect();
     }
-    
+
     if let Some(includes) = matches.get_many::<String>("include") {
         config.include_packages = includes.cloned().collect();
     }
@@ -132,7 +142,12 @@ pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
             "user" | "usercode" => ProfileMode::UserCode,
             "hotspots" => ProfileMode::Hotspots,
             "allocation" | "alloc" => ProfileMode::Allocation,
-            _ => return Err(format!("Invalid profile mode: {}. Use: all, user, hotspots, allocation", mode)),
+            _ => {
+                return Err(format!(
+                    "Invalid profile mode: {}. Use: all, user, hotspots, allocation",
+                    mode
+                ))
+            }
         };
     }
 
@@ -141,36 +156,43 @@ pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
 
 fn parse_time_to_nanos(time_str: &str) -> Result<u64, String> {
     let time_str = time_str.trim().to_lowercase();
-    
+
     if let Some(pos) = time_str.find(|c: char| c.is_alphabetic()) {
         let (number_part, unit_part) = time_str.split_at(pos);
         let number: f64 = number_part.parse().map_err(|_| "Invalid time number")?;
-        
+
         let multiplier = match unit_part {
             "ns" => 1,
             "us" | "μs" => 1_000,
             "ms" => 1_000_000,
             "s" => 1_000_000_000,
-            _ => return Err(format!("Invalid time unit: {}. Use: ns, us, ms, s", unit_part)),
+            _ => {
+                return Err(format!(
+                    "Invalid time unit: {}. Use: ns, us, ms, s",
+                    unit_part
+                ))
+            }
         };
-        
+
         Ok((number * multiplier as f64) as u64)
     } else {
         // Assume nanoseconds if no unit specified
-        time_str.parse().map_err(|_| "Invalid time value".to_string())
+        time_str
+            .parse()
+            .map_err(|_| "Invalid time value".to_string())
     }
 }
 
 pub fn detect_agent_path() -> Result<String, String> {
     // Get the current working directory to build absolute paths
-    let current_dir = env::current_dir()
-        .map_err(|e| format!("Failed to get current directory: {}", e))?;
-    
+    let current_dir =
+        env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
+
     // Try to find the agent library in common locations
     let possible_paths = vec![
         // Release build directory
         current_dir.join("target/release/librjprof.dylib"),
-        current_dir.join("target/release/librjprof.so"), 
+        current_dir.join("target/release/librjprof.so"),
         current_dir.join("target/release/rjprof.dll"),
         // Debug build directory as fallback
         current_dir.join("target/debug/librjprof.dylib"),
@@ -278,7 +300,8 @@ pub fn generate_flamegraph_svg(config: &ProfilerConfig) -> Result<(), String> {
                     fs::write(&svg_path, output.stdout)
                         .map_err(|e| format!("Failed to write SVG file: {}", e))?;
 
-                    logger::get_logger().result(&format!("Flamegraph SVG generated: {}", svg_path.display()));
+                    logger::get_logger()
+                        .result(&format!("Flamegraph SVG generated: {}", svg_path.display()));
                     return Ok(());
                 } else {
                     eprintln!(
@@ -297,7 +320,6 @@ pub fn generate_flamegraph_svg(config: &ProfilerConfig) -> Result<(), String> {
 
     Err("No flamegraph generator found. Install flamegraph.pl or inferno-flamegraph".to_string())
 }
-
 
 #[cfg(test)]
 mod tests {

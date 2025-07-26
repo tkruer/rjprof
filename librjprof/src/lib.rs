@@ -1,33 +1,33 @@
 //! # librjprof
-//! 
+//!
 //! A Java profiling library using JVMTI (Java Virtual Machine Tool Interface).
 //! This library provides low-level profiling capabilities for Java applications,
 //! including method timing, allocation tracking, and call graph analysis.
-//! 
+//!
 //! ## Features
-//! 
+//!
 //! - Method entry/exit profiling with timing
 //! - Memory allocation tracking
 //! - Call graph analysis  
 //! - Flamegraph generation
 //! - Smart filtering to reduce framework noise
-//! 
+//!
 //! ## Usage
-//! 
+//!
 //! This library is typically used by attaching it as a JVMTI agent to a Java process:
-//! 
+//!
 //! ```bash
 //! java -agentpath:librjprof.so MyJavaApp
 //! ```
-//! 
+//!
 //! The library can also be configured programmatically through the profiler configuration.
 
 pub mod bindings;
-pub mod profiling;
 pub mod logger;
+pub mod profiling;
 
 // Re-export key types for easier access
-pub use profiling::profiling::{set_profiler_config};
+pub use profiling::profiling::set_profiler_config;
 
 // Re-export configuration types from CLI (we'll need to move these)
 #[derive(Debug, Clone)]
@@ -72,10 +72,10 @@ pub enum ExportFormat {
 
 #[derive(Debug, Clone)]
 pub enum ProfileMode {
-    All,           // Profile everything
-    UserCode,      // Only user code (exclude JDK/framework)
-    Hotspots,      // Focus on methods above threshold
-    Allocation,    // Focus on allocation-heavy methods
+    All,        // Profile everything
+    UserCode,   // Only user code (exclude JDK/framework)
+    Hotspots,   // Focus on methods above threshold
+    Allocation, // Focus on allocation-heavy methods
 }
 
 impl Default for ProfilerConfig {
@@ -114,25 +114,21 @@ fn get_default_excludes() -> Vec<String> {
         "sun.*".to_string(),
         "com.sun.*".to_string(),
         "jdk.*".to_string(),
-        
         // Spring Framework (common noise)
         "org.springframework.*".to_string(),
         "org.apache.catalina.*".to_string(),
         "org.apache.tomcat.*".to_string(),
         "org.eclipse.jetty.*".to_string(),
-        
         // Common libraries that create noise
         "org.apache.logging.*".to_string(),
         "ch.qos.logback.*".to_string(),
         "org.slf4j.*".to_string(),
         "net.sf.cglib.*".to_string(),
         "org.apache.commons.*".to_string(),
-        
         // Reflection/Proxying
         "$$EnhancerBySpringCGLIB*".to_string(),
         "$$FastClassBySpringCGLIB*".to_string(),
         "com.sun.proxy.*".to_string(),
-        
         // Build tools
         "org.gradle.*".to_string(),
         "org.apache.maven.*".to_string(),

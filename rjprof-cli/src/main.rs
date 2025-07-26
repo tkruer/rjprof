@@ -1,12 +1,14 @@
 use clap::{Arg, Command};
-use rjprof::{ProfilerConfig, SortOption, ExportFormat, ProfileMode, get_spring_excludes, configure_profiler};
+use rjprof::{
+    configure_profiler, get_spring_excludes, ExportFormat, ProfileMode, ProfilerConfig, SortOption,
+};
 
 mod cli;
 mod logger;
 
-use logger::{Logger, LogLevel, init_logger};
+use logger::{init_logger, LogLevel, Logger};
 
-use cli::cli_tooling::{parse_config, run_profiler, generate_flamegraph_svg};
+use cli::cli_tooling::{generate_flamegraph_svg, parse_config, run_profiler};
 
 fn main() {
     let matches = Command::new("rjprof")
@@ -205,7 +207,7 @@ fn main() {
         };
         Logger::new(log_level, !matches.get_flag("no-color"), false)
     };
-    
+
     init_logger(logger);
     let log = logger::get_logger();
 
@@ -253,5 +255,8 @@ fn main() {
         }
     }
 
-    log.success(&format!("Profiling complete! Results saved to: {}", config.output_dir));
+    log.success(&format!(
+        "Profiling complete! Results saved to: {}",
+        config.output_dir
+    ));
 }
