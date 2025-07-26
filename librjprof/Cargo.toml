@@ -5,6 +5,11 @@ edition = "2021"
 description = "Java profiling library using JVMTI"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/tkruer/rjprof"
+documentation = "https://docs.rs/librjprof"
+homepage = "https://github.com/tkruer/rjprof"
+readme = "../README.md"
+keywords = ["profiling", "java", "jvmti", "performance", "library"]
+categories = ["development-tools::profiling", "api-bindings"]
 
 [lib]
 name = "rjprof"
