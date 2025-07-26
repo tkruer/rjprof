@@ -20,8 +20,8 @@ fn main() {
     bindgen::Builder::default()
         .header("src/wrapper.h")
         // point to JNI & JVMTI headers
-        .clang_arg(format!("-I{}/include", java_home))
-        .clang_arg(format!("-I{}/include/{}", java_home, platform_include))
+        .clang_arg(format!("-I{java_home}/include"))
+        .clang_arg(format!("-I{java_home}/include/{platform_include}"))
         // generate everything
         .allowlist_type(".*")
         .allowlist_function(".*")
