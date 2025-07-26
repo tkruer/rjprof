@@ -1,5 +1,5 @@
 # Makefile for rjprof
-.PHONY: all build clean test run-hello run-spring help install dev check
+.PHONY: all build clean test run-hello run-spring help install dev check docs lint format
 
 # Default target
 all: build
@@ -29,6 +29,26 @@ check:
 	@echo "🔍 Checking code..."
 	cargo check --workspace
 	@echo "✅ Code check complete!"
+
+# Generate documentation
+docs:
+	@echo "📚 Generating documentation..."
+	./scripts/docs.sh
+
+# Run clippy linter
+lint:
+	@echo "🔍 Running clippy..."
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+# Format code
+format:
+	@echo "✨ Formatting code..."
+	cargo fmt --all
+
+# Check formatting
+format-check:
+	@echo "🔍 Checking code formatting..."
+	cargo fmt --all -- --check
 
 # Clean build artifacts
 clean:
@@ -116,6 +136,12 @@ help:
 	@echo "  test          - Run Rust tests"
 	@echo "  run-hello     - Quick test with HelloWorld example"
 	@echo "  run-spring    - Test with Spring demo application"
+	@echo ""
+	@echo "Documentation targets:"
+	@echo "  docs          - Generate Rust documentation"
+	@echo "  lint          - Run clippy linter"
+	@echo "  format        - Format code with rustfmt"
+	@echo "  format-check  - Check code formatting"
 	@echo ""
 	@echo "Utility targets:"
 	@echo "  build-spring  - Build Spring demo JAR"

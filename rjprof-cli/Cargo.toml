@@ -5,6 +5,11 @@ edition = "2021"
 description = "Command-line interface for rjprof Java profiler"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/tkruer/rjprof"
+documentation = "https://docs.rs/rjprof-cli"
+homepage = "https://github.com/tkruer/rjprof"
+readme = "../README.md"
+keywords = ["profiling", "java", "jvmti", "performance", "flamegraph"]
+categories = ["development-tools::profiling", "command-line-utilities"]
 
 [[bin]]
 name = "rjprof"

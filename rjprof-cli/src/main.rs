@@ -19,7 +19,14 @@ fn main() {
                 .long("jar")
                 .value_name("JAR_FILE")
                 .help("JAR file to profile")
-                .required(true),
+                .required_unless_present("experimental-pid"),
+        )
+        .arg(
+            Arg::new("experimental-pid")
+                .long("experimental-pid")
+                .value_name("PID")
+                .help("[EXPERIMENTAL] Attach to existing Java process by PID")
+                .conflicts_with("jar"),
         )
         .arg(
             Arg::new("java-opts")
@@ -215,7 +222,11 @@ fn main() {
 
     if matches.get_flag("verbose") {
         log.section("Configuration");
-        log.config(&format!("JAR file: {}", config.jar_file));
+        if let Some(pid) = config.target_pid {
+            log.config(&format!("Target PID: {} (attach mode)", pid));
+        } else {
+            log.config(&format!("JAR file: {}", config.jar_file));
+        }
         log.config(&format!("Agent path: {}", config.agent_path));
         log.config(&format!("Output directory: {}", config.output_dir));
         log.config(&format!("Stack size: {}", config.stack_size));

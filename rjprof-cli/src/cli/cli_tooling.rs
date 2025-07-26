@@ -9,15 +9,23 @@ use crate::logger;
 pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
     let mut config = ProfilerConfig::default();
 
-    // Required JAR file
-    config.jar_file = matches
-        .get_one::<String>("jar")
-        .ok_or("JAR file is required")?
-        .clone();
+    // Handle PID mode vs JAR mode
+    if let Some(pid_str) = matches.get_one::<String>("experimental-pid") {
+        // PID mode - attach to existing process
+        config.target_pid = Some(pid_str.parse()
+            .map_err(|_| format!("Invalid PID: {}", pid_str))?);
+        config.jar_file = String::new(); // Not needed in PID mode
+    } else {
+        // JAR mode - launch new process
+        config.jar_file = matches
+            .get_one::<String>("jar")
+            .ok_or("JAR file is required when not using --experimental-pid")?
+            .clone();
 
-    // Validate JAR file exists
-    if !Path::new(&config.jar_file).exists() {
-        return Err(format!("JAR file not found: {}", config.jar_file));
+        // Validate JAR file exists
+        if !Path::new(&config.jar_file).exists() {
+            return Err(format!("JAR file not found: {}", config.jar_file));
+        }
     }
 
     // Java options
@@ -39,7 +47,15 @@ pub fn parse_config(matches: &ArgMatches) -> Result<ProfilerConfig, String> {
 
     // Agent path (auto-detect if not provided)
     if let Some(agent_path) = matches.get_one::<String>("agent-path") {
-        config.agent_path = agent_path.clone();
+        // Convert relative paths to absolute paths
+        let path = Path::new(agent_path);
+        if path.is_absolute() {
+            config.agent_path = agent_path.clone();
+        } else {
+            let current_dir = env::current_dir()
+                .map_err(|e| format!("Failed to get current directory: {}", e))?;
+            config.agent_path = current_dir.join(path).to_string_lossy().to_string();
+        }
     } else {
         config.agent_path = detect_agent_path()?;
     }
@@ -146,17 +162,25 @@ fn parse_time_to_nanos(time_str: &str) -> Result<u64, String> {
 }
 
 pub fn detect_agent_path() -> Result<String, String> {
+    // Get the current working directory to build absolute paths
+    let current_dir = env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+    
     // Try to find the agent library in common locations
     let possible_paths = vec![
-        // Current directory
-        "./target/release/librjprof.dylib",
-        "./target/release/librjprof.so",
-        "./target/release/rjprof.dll",
+        // Release build directory
+        current_dir.join("target/release/librjprof.dylib"),
+        current_dir.join("target/release/librjprof.so"), 
+        current_dir.join("target/release/rjprof.dll"),
+        // Debug build directory as fallback
+        current_dir.join("target/debug/librjprof.dylib"),
+        current_dir.join("target/debug/librjprof.so"),
+        current_dir.join("target/debug/rjprof.dll"),
     ];
 
     for path in possible_paths {
-        if Path::new(&path).exists() {
-            return Ok(path.to_string());
+        if path.exists() {
+            return Ok(path.to_string_lossy().to_string());
         }
     }
 

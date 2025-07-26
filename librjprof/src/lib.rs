@@ -52,6 +52,7 @@ pub struct ProfilerConfig {
     pub include_packages: Vec<String>,
     pub min_self_time_ns: Option<u64>,
     pub profile_mode: ProfileMode,
+    pub target_pid: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +101,7 @@ impl Default for ProfilerConfig {
             include_packages: vec![],
             min_self_time_ns: None,
             profile_mode: ProfileMode::UserCode,
+            target_pid: None,
         }
     }
 }
